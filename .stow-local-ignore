@@ -1,0 +1,13 @@
+# This file replaces Stow's default ignore list, so the defaults are repeated.
+\.git
+\.gitignore
+^/README.*
+^/LICENSE.*
+^/COPYING
+^/\.stow-local-ignore
+
+# Development-only files.
+^/node_modules
+^/package\.json
+^/pnpm-lock\.yaml
+^/pnpm-workspace\.yaml
