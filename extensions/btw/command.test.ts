@@ -5,7 +5,9 @@ import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 function installedPiRoot() {
-	const executable = (process.env.PATH ?? "").split(delimiter).map((dir) => join(dir, "pi")).find(existsSync);
+	// Skip package-manager shims so a local dev dependency never shadows the active Pi.
+	const executable = (process.env.PATH ?? "").split(delimiter).filter((dir) => !dir.endsWith(join("node_modules", ".bin")))
+		.map((dir) => join(dir, "pi")).find(existsSync);
 	assert.ok(executable, "Pi executable must be on PATH");
 	let dir = dirname(realpathSync(executable));
 	while (dirname(dir) !== dir) {
