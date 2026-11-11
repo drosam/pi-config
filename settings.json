@@ -17,5 +17,10 @@
     "npm:pi-lsp-extension",
     "npm:@observal/pi-insights"
   ],
-  "lastChangelogVersion": "1.4.0"
+  "lastChangelogVersion": "1.5.2",
+  "deviceId": "e921234f-8a2f-472e-b716-5f0fc58838c7",
+  "extensionChangelogVersions": {
+    "{\"source\":\"https://github.com/MasuRii/pi-permission-system\",\"scope\":\"user\"}": "0.8.0",
+    "{\"source\":\"npm:pi-lsp-extension\",\"scope\":\"user\"}": "1.4.0"
+  }
 }
