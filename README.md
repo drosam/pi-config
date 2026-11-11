@@ -1,10 +1,17 @@
 # Pi configuration and work artifacts
 
-Repo config: `pi/dot-pi/agent/`; live config: `~/.pi/agent/` through Stow. Shared skills live in `skills/dot-agents/skills/` and are exposed through `~/.agents/skills/`. Pi-specific skills live in `pi/dot-pi/agent/skills/`. Installed Pi 0.87.1 discovers both locations; no extra settings registration is needed. After skill changes use `/reload`; start a fresh session to ensure changed SYSTEM.md instructions are loaded.
+This repository (`~/Developer/pi-config`) is linked into `~/.pi/agent/` by the dotfiles installer with `stow -d ~/Developer -t ~/.pi/agent pi-config`. `~/.pi/agent` stays a real directory, so runtime files (auth, sessions, `keybindings.json`, `trust.json`) never land here.
+
+- Pi-specific skills and agents: `skills/` and `agents/` here.
+- Shared skills and agents: the `agents` repository, linked into `~/.agents/skills/` and `~/.agents/agents/`. Pi discovers `~/.agents/skills/` natively; the subagent extension reads `~/.agents/agents/`, and a same-named agent here overrides a shared one.
+- `herdr integration install pi` writes `extensions/herdr-agent-state.ts` here through the link; it stays untracked.
+- Tests: `pnpm install`, then `pnpm test`. The `btw` and `compact-min` tests load your installed Pi from `PATH`.
+
+After skill changes use `/reload`; start a fresh session to ensure changed SYSTEM.md instructions are loaded.
 
 ## Local work area
 
-All paths below are relative to the **target project repository**, not the dotfiles repo or installed skill directory:
+All paths below are relative to the **target project repository**, not this repo or installed skill directory:
 
 ```text
 .agent-work/
@@ -21,7 +28,7 @@ All paths below are relative to the **target project repository**, not the dotfi
 
 Use a stable kebab-case `<work-id>` matching the documents' Work-ID. Keep each work item's spec and plan together; shared domain context and ADRs stay outside individual work directories. Default to one `spec.md` and one `plan.md`. Only when explicitly needed and approved, use `specs/` and/or `plans/` within that work directory for multiple documents, with actual relative links. Do not reorganize existing files automatically.
 
-Create lazily, only as needed. The managed global excludes file (`gitconfig/dot-config/git/ignore`, stowed to `~/.config/git/ignore`) ignores `.agent-work/` in every repository, so untracked artifacts stay out of normal `git status` and `git add .`. Do not add per-repository ignore rules. Never stage/commit these artifacts; if legacy, tracked, or force-added content is staged, stop and ask without silently unstaging. Avoid secrets and customer data.
+Create lazily, only as needed. The managed global excludes file (dotfiles `gitconfig/dot-config/git/ignore`, stowed to `~/.config/git/ignore`) ignores `.agent-work/` in every repository, so untracked artifacts stay out of normal `git status` and `git add .`. Do not add per-repository ignore rules. Never stage/commit these artifacts; if legacy, tracked, or force-added content is staged, stop and ask without silently unstaging. Avoid secrets and customer data.
 
 This convention governs generated working documents, not application source, tests, user-requested project documentation, or skill implementation files. Existing project docs remain useful evidence. Do not migrate earlier flat work-area layouts, `.prd/`, `docs/design/`, project glossaries or ADRs, or overwrite existing files automatically. Confirm legacy document selection and any migration first; preserve inbound links when moving an approved artifact.
 
@@ -75,7 +82,7 @@ Before code generation, implementation, review, or artifact editing:
 5. Pass exact selected paths, Work-ID, status, relevant decisions and authorized scope to workers, or explicitly confirmed no-artifact context. A worker missing this identity must return candidate paths and a clarification request to the coordinator, not choose independently or launch new interviews it cannot complete.
 6. Selection is context only. Respect each skill's implementation, review-item, write and publication gates. Report selected paths and any remaining ambiguity at handoff.
 
-Pi's always-loaded rule lives in `dot-pi/agent/SYSTEM.md`; portable skills and isolated agent definitions also carry the relevant contract so it does not depend on this README being loaded.
+Pi's always-loaded rule lives in `SYSTEM.md`; portable skills and isolated agent definitions also carry the relevant contract so it does not depend on this README being loaded.
 
 ## Maintenance acceptance checks
 
@@ -92,4 +99,4 @@ Static desk checks, not claims of observed agent behavior:
 - Review/breakdown → consume chosen context, preserve parent docs and existing approval gates; publish only accepted tickets on explicit instruction.
 - Commit request → `.agent-work/` globally excluded from ordinary adds; inspect the whole index for tracked or force-added artifacts.
 
-Strict skill validation uses `skills/dot-agents/skills/skill-writer/scripts/quick_validate.py`; do not install its dependencies without approval. Runtime adherence needs separate model-session testing.
+Strict skill validation uses `skills/skill-writer/scripts/quick_validate.py` in the `agents` repository; do not install its dependencies without approval. Runtime adherence needs separate model-session testing.
