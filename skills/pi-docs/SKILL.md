@@ -50,27 +50,29 @@ Follow cross-references relevant to the question, not the whole documentation gr
 
 ## Local Config
 
-This dotfiles repo stores pi config under:
+Pi config lives in the `pi-config` repository:
 
 ```text
-pi/dot-pi/agent/
+~/Developer/pi-config/
 ```
 
-Live config is usually symlinked under:
+Live config is symlinked per item under:
 
 ```text
 ~/.pi/agent/
 ```
 
-Useful local paths:
+Useful local paths, relative to `~/Developer/pi-config/`:
 
 | Area | Path |
 | --- | --- |
-| Settings | `pi/dot-pi/agent/settings.json` |
-| Extensions | `pi/dot-pi/agent/extensions/` |
-| Themes | `pi/dot-pi/agent/themes/` |
-| Agents | `pi/dot-pi/agent/agents/` |
-| Skills | `pi/dot-pi/agent/skills/` |
+| Settings | `settings.json` |
+| Extensions | `extensions/` |
+| Themes | `themes/` |
+| Agents (Pi-only) | `agents/` |
+| Skills (Pi-only) | `skills/` |
+
+Shared skills and agents live in `~/Developer/agents/` (`skills/`, `agents/`), linked into `~/.agents/`.
 
 ## Implementation Rules
 
