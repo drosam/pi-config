@@ -1,0 +1,45 @@
+{
+  "autoStart": [
+    "ruby",
+    "typescript",
+    "typescriptreact",
+    "javascript",
+    "javascriptreact"
+  ],
+  "autoInjectDiagnostics": [
+    "ruby",
+    "typescript",
+    "typescriptreact",
+    "javascript",
+    "javascriptreact"
+  ],
+  "servers": {
+    "ruby": {
+      "command": "bundle",
+      "args": ["exec", "ruby-lsp"],
+      "initializationOptions": {
+        "addonSettings": {
+          "Ruby LSP Rails": {
+            "enablePendingMigrationsPrompt": false
+          }
+        }
+      }
+    },
+    "typescript": {
+      "command": "typescript-language-server",
+      "args": ["--stdio"]
+    },
+    "typescriptreact": {
+      "command": "typescript-language-server",
+      "args": ["--stdio"]
+    },
+    "javascript": {
+      "command": "typescript-language-server",
+      "args": ["--stdio"]
+    },
+    "javascriptreact": {
+      "command": "typescript-language-server",
+      "args": ["--stdio"]
+    }
+  }
+}
