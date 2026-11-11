@@ -1,0 +1,76 @@
+{
+  "defaultPolicy": {
+    "tools": "ask",
+    "bash": "ask",
+    "mcp": "ask",
+    "skills": "ask",
+    "special": "ask"
+  },
+  "tools": {
+    "read": "allow",
+    "grep": "allow",
+    "find": "allow",
+    "ls": "allow",
+    "edit": "ask",
+    "write": "ask",
+    "bash": "ask",
+    "question": "allow",
+    "task": "allow",
+    "task_list": "allow",
+    "webfetch": "ask",
+    "websearch": "ask",
+    "lsp": "allow",
+    "todoread": "allow",
+    "todowrite": "allow",
+    "glob": "allow",
+    "list": "allow"
+  },
+  "bash": {
+    "*": "ask",
+    "git status": "allow",
+    "git status *": "allow",
+    "git diff": "allow",
+    "git diff *": "allow",
+    "git show": "allow",
+    "git show *": "allow",
+    "git log": "allow",
+    "git log *": "allow",
+    "git merge *": "deny",
+    "git rebase *": "deny",
+    "git push *": "deny",
+    "git merge-base *": "allow",
+    "git branch --show-current": "allow",
+    "git branch -d *": "deny",
+    "git branch -D *": "deny",
+    "grep *": "allow",
+    "find *": "allow",
+    "head *": "allow",
+    "pwd": "allow",
+    "pwd*": "allow",
+    "bundle exec rspec *": "allow",
+    "bin/rspec *": "allow",
+    "bundle exec cucumber *": "allow",
+    "bin/cucumber *": "allow",
+    "BROWSER=headless_chrome bundle exec cucumber *": "allow",
+    "BROWSER=headless_chrome bin/cucumber *": "allow",
+    "bundle exec rubocop *": "allow",
+    "bin/rubocop *": "allow",
+    "pnpm jest *": "allow",
+    "pnpm eslint *": "allow",
+    "pnpm test *": "allow",
+    "pnpm run eslint *": "allow",
+    "pnpm exec eslint *": "allow",
+    "rm *": "ask",
+    "sudo *": "deny"
+  },
+  "mcp": {
+    "*": "ask"
+  },
+  "skills": {
+    "*": "ask"
+  },
+  "special": {
+    "external_directory": "ask",
+    "doom_loop": "deny"
+  }
+}
