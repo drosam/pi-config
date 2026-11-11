@@ -1,9 +1,10 @@
 /**
  * Agent discovery and configuration.
- * Loads agent definitions from ~/.pi/agent/agents/ and .pi/agents/
+ * Loads agent definitions from ~/.agents/agents/, ~/.pi/agent/agents/ and .pi/agents/
  */
 
 import * as fs from "node:fs"
+import * as os from "node:os"
 import * as path from "node:path"
 import {
   DefaultPackageManager,
@@ -261,14 +262,27 @@ function findProjectAgentsDir(cwd: string): string | null {
   }
 }
 
-export function discoverAgents(cwd: string): AgentConfig[] {
-  const userDir = path.join(getAgentDir(), "agents")
-  const projectDir = findProjectAgentsDir(cwd)
+export interface AgentDirs {
+  shared: string
+  user: string
+  project: string | null
+}
 
+export function defaultAgentDirs(cwd: string): AgentDirs {
+  return {
+    shared: path.join(os.homedir(), ".agents", "agents"),
+    user: path.join(getAgentDir(), "agents"),
+    project: findProjectAgentsDir(cwd),
+  }
+}
+
+/** Later sources override earlier ones by name: shared, then user, then project. */
+export function discoverAgents(cwd: string, dirs: AgentDirs = defaultAgentDirs(cwd)): AgentConfig[] {
   const map = new Map<string, AgentConfig>()
-  for (const a of loadAgentsFromDir(userDir, "user", cwd)) map.set(a.name, a)
-  if (projectDir) {
-    for (const a of loadAgentsFromDir(projectDir, "project", cwd)) map.set(a.name, a)
+  for (const a of loadAgentsFromDir(dirs.shared, "user", cwd)) map.set(a.name, a)
+  for (const a of loadAgentsFromDir(dirs.user, "user", cwd)) map.set(a.name, a)
+  if (dirs.project) {
+    for (const a of loadAgentsFromDir(dirs.project, "project", cwd)) map.set(a.name, a)
   }
   return Array.from(map.values())
 }

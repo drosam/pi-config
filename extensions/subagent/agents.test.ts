@@ -2,7 +2,7 @@ import { describe, test, expect, beforeEach, afterEach } from "vitest"
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
-import { loadAgentsFromDir, resolveModel } from "./agents.js"
+import { discoverAgents, loadAgentsFromDir, resolveModel } from "./agents.js"
 
 let tmpDir: string
 
@@ -291,33 +291,57 @@ Body
 })
 
 describe("discoverAgents", () => {
-  test("project agents override user agents with same name", () => {
-    const userDir = join(tmpDir, "user-agents")
-    const projectRoot = join(tmpDir, "project")
-    const projectDir = join(projectRoot, ".pi", "agents")
-    mkdirSync(userDir, { recursive: true })
-    mkdirSync(projectDir, { recursive: true })
+  let dirs: { shared: string; user: string; project: string }
 
-    writeFileSync(
-      join(userDir, "scout.md"),
-      `---\nname: scout\ndescription: user scout\n---\nUser version`,
-    )
-    writeFileSync(
-      join(projectDir, "scout.md"),
-      `---\nname: scout\ndescription: project scout\n---\nProject version`,
-    )
+  const writeAgent = (dir: string, name: string, description: string) => {
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, `${name}.md`), `---\nname: ${name}\ndescription: ${description}\n---\nBody`)
+  }
 
-    // Load separately and merge like discoverAgents does
-    const userAgents = loadAgentsFromDir(userDir, "user")
-    const projectAgents = loadAgentsFromDir(projectDir, "project")
+  beforeEach(() => {
+    dirs = {
+      shared: join(tmpDir, "shared-agents"),
+      user: join(tmpDir, "user-agents"),
+      project: join(tmpDir, "project", ".pi", "agents"),
+    }
+  })
 
-    const map = new Map<string, (typeof userAgents)[number]>()
-    for (const a of userAgents) map.set(a.name, a)
-    for (const a of projectAgents) map.set(a.name, a)
-    const result = Array.from(map.values())
+  test("loads shared agents as user-scoped", () => {
+    writeAgent(dirs.shared, "reviewer", "shared reviewer")
+
+    const result = discoverAgents(tmpDir, { ...dirs, project: null })
 
     expect(result).toHaveLength(1)
-    expect(result[0]!.source).toBe("project")
-    expect(result[0]!.description).toBe("project scout")
+    expect(result[0]).toMatchObject({ name: "reviewer", source: "user", description: "shared reviewer" })
+  })
+
+  test("user agents override shared agents with same name", () => {
+    writeAgent(dirs.shared, "scout", "shared scout")
+    writeAgent(dirs.user, "scout", "user scout")
+    writeAgent(dirs.shared, "reviewer", "shared reviewer")
+
+    const result = discoverAgents(tmpDir, { ...dirs, project: null })
+
+    expect(result.map((a) => a.description).sort()).toEqual(["shared reviewer", "user scout"])
+  })
+
+  test("project agents override user and shared agents with same name", () => {
+    writeAgent(dirs.shared, "scout", "shared scout")
+    writeAgent(dirs.user, "scout", "user scout")
+    writeAgent(dirs.project, "scout", "project scout")
+
+    const result = discoverAgents(tmpDir, dirs)
+
+    expect(result).toHaveLength(1)
+    expect(result[0]).toMatchObject({ source: "project", description: "project scout" })
+  })
+
+  test("missing shared directory is ignored", () => {
+    writeAgent(dirs.user, "scout", "user scout")
+
+    const result = discoverAgents(tmpDir, { ...dirs, project: null })
+
+    expect(result).toHaveLength(1)
+    expect(result[0]!.description).toBe("user scout")
   })
 })

@@ -3,7 +3,7 @@
  *
  * Provides a `subagent` tool that spawns agent definitions in isolated
  * subprocesses. Agent definitions (markdown + frontmatter) live in
- * ~/.pi/agent/agents/ (user) and .pi/agents/ (project).
+ * ~/.agents/agents/ (shared), ~/.pi/agent/agents/ (user) and .pi/agents/ (project).
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent"
@@ -207,7 +207,7 @@ export default function(pi: ExtensionAPI) {
     name: "task_list",
     label: "List Agents",
     description:
-      "List all available task agent definitions from ~/.pi/agent/agents/ and .pi/agents/.",
+      "List all available task agent definitions from ~/.agents/agents/, ~/.pi/agent/agents/ and .pi/agents/.",
     promptSnippet: "List available task agents.",
     parameters: Type.Object({}),
 
