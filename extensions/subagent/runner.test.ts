@@ -1,5 +1,5 @@
 import { describe, test, expect } from "vitest"
-import { buildArgs, getFinalOutput, getDisplayItems, isTerminalAssistantMessage } from "./runner.js"
+import { buildArgs, describeToolCall, getFinalOutput, getDisplayItems, isTerminalAssistantMessage } from "./runner.js"
 import type { AgentConfig } from "./agents.js"
 import type { Message } from "@mariozechner/pi-ai"
 
@@ -15,13 +15,23 @@ function agent(overrides: Partial<AgentConfig> = {}): AgentConfig {
 }
 
 describe("buildArgs", () => {
-  test("default: sandboxed with --no-extensions", () => {
+  test("default: extensions disabled with --no-extensions", () => {
     const args = buildArgs(agent())
     expect(args).toContain("--no-extensions")
     expect(args).toContain("--mode")
-    expect(args).toContain("json")
-    expect(args).toContain("-p")
+    expect(args).toContain("rpc")
+    expect(args).not.toContain("-p")
     expect(args).toContain("--no-session")
+  })
+
+  test("persists and resumes an explicit session with inherited trust", () => {
+    const args = buildArgs(agent(), undefined, { sessionFile: "/tmp/task.jsonl", projectTrusted: false })
+    expect(args).toContain("--session")
+    expect(args).toContain("/tmp/task.jsonl")
+    expect(args).not.toContain("--no-session")
+    expect(args).toContain("--no-approve")
+    expect(args).not.toContain("--approve")
+    expect(buildArgs(agent(), undefined, { projectTrusted: true })).toContain("--approve")
   })
 
   test("extensions: true omits --no-extensions", () => {
@@ -135,6 +145,15 @@ describe("buildArgs", () => {
     const args = buildArgs(agent({ thinking: "off" }), { thinking: "high" })
     const idx = args.indexOf("--thinking")
     expect(args[idx + 1]).toBe("off")
+  })
+})
+
+describe("describeToolCall", () => {
+  test("summarizes the most useful argument on one line", () => {
+    expect(describeToolCall("bash", { command: "sleep\n 60" })).toBe("bash sleep 60")
+    expect(describeToolCall("read", { path: "src/a.ts", offset: 2 })).toBe("read src/a.ts")
+    expect(describeToolCall("custom", null)).toBe("custom")
+    expect(describeToolCall("bash", { command: "x".repeat(300) })).toHaveLength(105)
   })
 })
 

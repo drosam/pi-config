@@ -4,6 +4,7 @@ This repository holds Pi agent configuration. Link its contents into `~/.pi/agen
 
 - Pi-specific skills and agents: `skills/` and `agents/` here.
 - Shared skills and agents: the [`agents`](https://github.com/drosam/agents) repository, linked into `~/.agents/skills/` and `~/.agents/agents/`. Pi discovers `~/.agents/skills/` natively; the subagent extension reads `~/.agents/agents/`, and a same-named agent here overrides a shared one.
+- [Task agents](extensions/subagent/README.md): foreground/background delegation, saved-session resume, steering/cancellation, and `/tasks` fleet controls.
 - `herdr integration install pi` writes `extensions/herdr-agent-state.ts` here through the link; it stays untracked.
 - Tests: `pnpm install`, then `pnpm test`. The `btw` and `compact-min` tests load your installed Pi from `PATH`. `skills/fewer-permission-prompts` tests run separately: `python3 -m unittest discover -s skills/fewer-permission-prompts/tests`.
 

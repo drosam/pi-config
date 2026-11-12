@@ -1,15 +1,14 @@
-/**
- * Subagent process runner.
- * Spawns a pi subprocess in JSON mode, streams messages back.
- */
-
-import { spawn } from "node:child_process"
+/** Subagent subprocess runner, controlled through Pi's documented RPC protocol. */
 import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
+import { fileURLToPath } from "node:url"
 import type { Message } from "@mariozechner/pi-ai"
 import { withFileMutationQueue } from "@mariozechner/pi-coding-agent"
 import { resolveModel, type AgentConfig } from "./agents.js"
+import { TaskRpc, type WorkerUiRequest, type WorkerUiResponse } from "./rpc.js"
+
+export type { WorkerUiRequest, WorkerUiResponse } from "./rpc.js"
 
 interface UsageStats {
   input: number
@@ -34,16 +33,37 @@ export interface RunResult {
   thinking?: string
   stopReason?: string
   errorMessage?: string
+  sessionFile?: string
+}
+
+export interface CallerDefaults {
+  provider?: string
+  model?: string
+  thinking?: string
+}
+
+export interface AgentControl {
+  steer(message: string): Promise<void>
+  cancel(): Promise<void>
+}
+
+export interface RunOptions {
+  sessionFile?: string
+  resume?: boolean
+  projectTrusted?: boolean
+  onReady?: (control: AgentControl) => void
+  onActivity?: (activity: string) => void
+  onUiRequest?: (request: WorkerUiRequest, signal: AbortSignal) => Promise<WorkerUiResponse>
 }
 
 export type OnProgress = (result: RunResult) => void
 
-function emptyUsage(): UsageStats {
-  return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 }
+/** Short human label for a tool call, e.g. `bash sleep 60` or `read src/a.ts`. */
+export function describeToolCall(name: string, args: unknown): string {
+  const input = (args && typeof args === "object" ? args : {}) as Record<string, unknown>
+  const detail = [input.command, input.path, input.pattern, input.query, input.url].find((value) => typeof value === "string" && value.trim())
+  return detail ? `${name} ${String(detail).replace(/\s+/g, " ").trim().slice(0, 100)}` : name
 }
-
-const TERMINAL_MESSAGE_GRACE_MS = 1500
-const FORCE_KILL_AFTER_GRACE_MS = 5000
 
 export function isTerminalAssistantMessage(msg: Message): boolean {
   if (msg.role !== "assistant") return false
@@ -57,49 +77,36 @@ function getPiInvocation(args: string[]): { command: string; args: string[] } {
     return { command: process.execPath, args: [currentScript, ...args] }
   }
   const execName = path.basename(process.execPath).toLowerCase()
-  if (!/^(node|bun)(\.exe)?$/.test(execName)) {
-    return { command: process.execPath, args }
-  }
+  if (!/^(node|bun)(\.exe)?$/.test(execName)) return { command: process.execPath, args }
   return { command: "pi", args }
 }
 
-async function writePromptFile(
-  agentName: string,
-  prompt: string,
-): Promise<{ dir: string; path: string }> {
-  const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "pi-subagent-"))
-  const safe = agentName.replace(/[^\w.-]+/g, "_")
-  const filePath = path.join(dir, `prompt-${safe}.md`)
-  await withFileMutationQueue(filePath, async () => {
-    await fs.promises.writeFile(filePath, prompt, { encoding: "utf-8", mode: 0o600 })
-  })
-  return { dir, path: filePath }
+async function validateSavedSession(file: string, cwd: string): Promise<void> {
+  const handle = await fs.promises.open(file, "r")
+  try {
+    const buffer = Buffer.alloc(65_536)
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0)
+    const header = JSON.parse(buffer.subarray(0, bytesRead).toString("utf8").split("\n")[0])
+    if (header.type !== "session" || typeof header.id !== "string" || typeof header.cwd !== "string" || path.resolve(header.cwd) !== path.resolve(cwd)) {
+      throw new Error("Saved task session has an invalid header or different working directory")
+    }
+  } finally { await handle.close() }
 }
 
-export interface CallerDefaults {
-  provider?: string
-  model?: string
-  thinking?: string
-}
-
-/** Build CLI args for spawning a subagent (without the task message or prompt file). */
-export function buildArgs(agent: AgentConfig, callerDefaults?: CallerDefaults): string[] {
-  const args: string[] = ["--mode", "json", "-p", "--no-session"]
-  if (agent.extensions === true) {
-    // load all discovered extensions
-  } else if (Array.isArray(agent.extensions)) {
-    // sandbox + only the listed extensions
+export function buildArgs(agent: AgentConfig, callerDefaults?: CallerDefaults, options: RunOptions = {}): string[] {
+  const args = ["--mode", "rpc"]
+  if (options.sessionFile) args.push("--session", options.sessionFile)
+  else args.push("--no-session")
+  if (options.projectTrusted !== undefined) args.push(options.projectTrusted ? "--approve" : "--no-approve")
+  if (agent.extensions !== true) {
     args.push("--no-extensions")
-    for (const ext of agent.extensions) args.push("-e", ext)
-  } else {
-    // default: clean sandbox, no extensions
-    args.push("--no-extensions")
+    if (Array.isArray(agent.extensions)) for (const ext of agent.extensions) args.push("-e", ext)
   }
   const model = resolveModel(agent.model, callerDefaults?.provider) ?? callerDefaults?.model
   const thinking = agent.thinking ?? callerDefaults?.thinking
   if (model) args.push("--model", model)
   if (thinking) args.push("--thinking", thinking)
-  if (agent.tools && agent.tools.length > 0) args.push("--tools", agent.tools.join(","))
+  if (agent.tools?.length) args.push("--tools", agent.tools.join(","))
   return args
 }
 
@@ -110,200 +117,162 @@ export async function runAgent(
   signal: AbortSignal | undefined,
   onProgress?: OnProgress,
   callerDefaults?: CallerDefaults,
+  options: RunOptions = {},
 ): Promise<RunResult> {
-  const args = buildArgs(agent, callerDefaults)
-
-  let tmpDir: string | null = null
-  let tmpPath: string | null = null
-
-  const effectiveModel = resolveModel(agent.model, callerDefaults?.provider) ?? callerDefaults?.model
-  const effectiveThinking = agent.thinking ?? callerDefaults?.thinking
-
   const result: RunResult = {
-    agent: agent.name,
-    task,
-    startedAt: Date.now(),
-    exitCode: 0,
-    messages: [],
-    stderr: "",
-    usage: emptyUsage(),
-    model: effectiveModel,
-    thinking: effectiveThinking,
+    agent: agent.name, task, startedAt: Date.now(), exitCode: 0, messages: [], stderr: "",
+    usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 },
+    model: resolveModel(agent.model, callerDefaults?.provider) ?? callerDefaults?.model,
+    thinking: agent.thinking ?? callerDefaults?.thinking,
+    sessionFile: options.sessionFile,
   }
+  let tmpDir: string | undefined
+  let rpc: TaskRpc | undefined
+  let settled = false
+  let cancelled = false
+  let cancelling: Promise<void> | undefined
+  const uiAbort = new AbortController()
+  let finish!: () => void
+  const completed = new Promise<void>((resolve) => { finish = resolve })
+  const abort = () => { void cancel() }
 
-  const emitProgress = () => onProgress?.(result)
+  async function cancel(): Promise<void> {
+    if (settled) return
+    if (cancelling) return cancelling
+    cancelled = true
+    uiAbort.abort()
+    cancelling = (async () => {
+      if (rpc) {
+        try {
+          await rpc.request("clear_queue", {}, 1000)
+          await rpc.request("abort", {}, 2000)
+        } catch { /* A dead or unresponsive child still needs to be reaped. */ }
+        await rpc.stop()
+      }
+      finish()
+    })()
+    return cancelling
+  }
 
   try {
-    if (agent.systemPrompt.trim()) {
-      const tmp = await writePromptFile(agent.name, agent.systemPrompt)
-      tmpDir = tmp.dir
-      tmpPath = tmp.path
-      args.push("--append-system-prompt", tmpPath)
+    if (signal?.aborted) {
+      cancelled = true
+      return result
     }
-
-    args.push(`Task: ${task}`)
-    let wasAborted = false
-
-    const exitCode = await new Promise<number>((resolve) => {
-      const invocation = getPiInvocation(args)
-      const proc = spawn(invocation.command, invocation.args, {
-        cwd,
-        shell: false,
-        stdio: ["ignore", "pipe", "pipe"],
-        env: { ...process.env, PI_SUBAGENT_NAME: agent.name },
-      })
-      let buffer = ""
-      let resolved = false
-      let sawTerminalAssistantMessage = false
-      let terminalDrainTimer: ReturnType<typeof setTimeout> | null = null
-      let forceKillTimer: ReturnType<typeof setTimeout> | null = null
-      let abortListener: (() => void) | null = null
-
-      const clearTimers = () => {
-        if (terminalDrainTimer) {
-          clearTimeout(terminalDrainTimer)
-          terminalDrainTimer = null
-        }
-        if (forceKillTimer) {
-          clearTimeout(forceKillTimer)
-          forceKillTimer = null
-        }
-      }
-
-      const safeResolve = (code: number) => {
-        if (resolved) return
-        resolved = true
-        clearTimers()
-        if (abortListener) signal?.removeEventListener("abort", abortListener)
-        if (buffer.trim()) processLine(buffer)
-        proc.stdout?.removeAllListeners("data")
-        proc.stderr?.removeAllListeners("data")
-        proc.stdout?.destroy()
-        proc.stderr?.destroy()
-        resolve(code)
-      }
-
-      const scheduleTerminalResolve = () => {
-        if (!sawTerminalAssistantMessage || resolved) return
-        if (terminalDrainTimer) clearTimeout(terminalDrainTimer)
-        terminalDrainTimer = setTimeout(() => {
-          if (resolved) return
-          if (proc.exitCode === null) {
-            proc.kill("SIGTERM")
-            forceKillTimer = setTimeout(() => {
-              if (proc.exitCode === null) proc.kill("SIGKILL")
-            }, FORCE_KILL_AFTER_GRACE_MS)
+    if (options.resume && (!options.sessionFile || !fs.existsSync(options.sessionFile))) {
+      throw new Error("Saved task session is missing; refusing to start a fresh conversation")
+    }
+    if (options.resume) await validateSavedSession(options.sessionFile!, cwd)
+    const args = buildArgs(agent, callerDefaults, options)
+    args.push("-e", fileURLToPath(new URL("./lifetime.ts", import.meta.url)))
+    if (agent.systemPrompt.trim()) {
+      tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "pi-subagent-"))
+      const promptPath = path.join(tmpDir, "prompt.md")
+      await withFileMutationQueue(promptPath, () => fs.promises.writeFile(promptPath, agent.systemPrompt, { mode: 0o600 }))
+      args.push("--append-system-prompt", promptPath)
+    }
+    if (signal?.aborted) {
+      cancelled = true
+      return result
+    }
+    const invocation = getPiInvocation(args)
+    rpc = new TaskRpc(invocation.command, invocation.args, cwd, agent.name, (event) => {
+      if (event.type === "message_end" && event.message) {
+        const msg = event.message as Message
+        result.messages.push(msg)
+        while (result.messages.length > 1 && (result.messages.length > 200 || JSON.stringify(result.messages).length > 2 * 1024 * 1024)) result.messages.shift()
+        if (msg.role === "assistant") {
+          result.usage.turns++
+          const usage = msg.usage
+          if (usage) {
+            result.usage.input += usage.input || 0
+            result.usage.output += usage.output || 0
+            result.usage.cacheRead += usage.cacheRead || 0
+            result.usage.cacheWrite += usage.cacheWrite || 0
+            result.usage.cost += usage.cost?.total || 0
+            result.usage.contextTokens = usage.totalTokens || 0
           }
-          safeResolve(proc.exitCode ?? 0)
-        }, TERMINAL_MESSAGE_GRACE_MS)
+          result.stopReason = msg.stopReason
+          result.errorMessage = msg.errorMessage
+        }
+        onProgress?.({ ...result, messages: [...result.messages], usage: { ...result.usage } })
+      } else if (event.type === "tool_execution_start") {
+        options.onActivity?.(describeToolCall(event.toolName, event.args))
+      } else if (event.type === "turn_start" || event.type === "tool_execution_end") {
+        options.onActivity?.("thinking...")
+      } else if (event.type === "auto_retry_start") {
+        options.onActivity?.("retrying")
+      } else if (event.type === "compaction_start") {
+        options.onActivity?.("compacting")
+      } else if (event.type === "agent_settled") {
+        settled = true
+        if (event.aborted) cancelled = true
+        finish()
+      } else if (event.type === "extension_ui_request") {
+        const request = event as WorkerUiRequest
+        if (!["select", "confirm", "input", "editor"].includes(request.method)) return
+        const reply = options.onUiRequest
+          ? options.onUiRequest(request, uiAbort.signal).catch(() => ({ cancelled: true }))
+          : Promise.resolve({ cancelled: true })
+        void reply.then((response) => rpc?.write({ ...response, type: "extension_ui_response", id: request.id }))
+          .catch(() => {})
       }
-
-      const processLine = (line: string) => {
-        if (!line.trim()) return
-        let event: any
-        try {
-          event = JSON.parse(line)
-        } catch {
-          return
-        }
-
-        if (event.type === "message_end" && event.message) {
-          const msg = event.message as Message
-          result.messages.push(msg)
-
-          if (msg.role === "assistant") {
-            result.usage.turns++
-            const usage = msg.usage
-            if (usage) {
-              result.usage.input += usage.input || 0
-              result.usage.output += usage.output || 0
-              result.usage.cacheRead += usage.cacheRead || 0
-              result.usage.cacheWrite += usage.cacheWrite || 0
-              result.usage.cost += usage.cost?.total || 0
-              result.usage.contextTokens = usage.totalTokens || 0
-            }
-            if (!result.model && msg.model) result.model = msg.model
-            if (msg.stopReason) result.stopReason = msg.stopReason
-            if (msg.errorMessage) result.errorMessage = msg.errorMessage
-            if (isTerminalAssistantMessage(msg)) {
-              sawTerminalAssistantMessage = true
-              scheduleTerminalResolve()
-            }
-          }
-          emitProgress()
-        }
-
-        if (event.type === "tool_result_end" && event.message) {
-          result.messages.push(event.message as Message)
-          emitProgress()
-        }
+    }, (error) => {
+      if (!settled && !cancelled) {
+        result.errorMessage ??= error?.message ?? "Pi exited before the task settled"
+        result.exitCode = 1
       }
-
-      proc.stdout.on("data", (data) => {
-        buffer += data.toString()
-        const lines = buffer.split("\n")
-        buffer = lines.pop() || ""
-        for (const line of lines) processLine(line)
-        scheduleTerminalResolve()
-      })
-
-      proc.stderr.on("data", (data) => {
-        result.stderr += data.toString()
-        scheduleTerminalResolve()
-      })
-
-      // Prefer process exit, but do not wait indefinitely once a terminal
-      // assistant message has already been emitted. Some extension stacks
-      // keep the child event loop alive after the final JSON event.
-      proc.on("exit", (code) => {
-        setTimeout(() => safeResolve(code ?? 0), 200)
-      })
-
-      proc.on("error", () => safeResolve(1))
-
-      if (signal) {
-        abortListener = () => {
-          wasAborted = true
-          proc.kill("SIGTERM")
-          setTimeout(() => {
-            if (proc.exitCode === null) proc.kill("SIGKILL")
-          }, FORCE_KILL_AFTER_GRACE_MS)
-        }
-        if (signal.aborted) abortListener()
-        else signal.addEventListener("abort", abortListener, { once: true })
-      }
+      finish()
     })
-
-    result.exitCode = exitCode
-    result.elapsed = (Date.now() - result.startedAt) / 1000
-    if (wasAborted) throw new Error("Subagent was aborted")
-    return result
+    signal?.addEventListener("abort", abort, { once: true })
+    if (signal?.aborted) abort()
+    await rpc.request("get_state")
+    if (!cancelled) {
+      options.onReady?.({
+        async steer(message) {
+          if (settled || cancelled) throw new Error("Task is no longer running")
+          await rpc!.request("steer", { message })
+        },
+        cancel,
+      })
+      const response = await rpc.request("prompt", { message: `Task: ${task}` })
+      if (response.disposition === "handled") {
+        settled = true
+        finish()
+      }
+      await completed
+    }
+  } catch (error) {
+    result.errorMessage = error instanceof Error ? error.message : String(error)
+    result.exitCode = 1
   } finally {
-    if (tmpPath)
-      try {
-        fs.unlinkSync(tmpPath)
-      } catch { }
-    if (tmpDir)
-      try {
-        fs.rmdirSync(tmpDir)
-      } catch { }
+    signal?.removeEventListener("abort", abort)
+    uiAbort.abort()
+    await rpc?.stop()
+    result.stderr = rpc?.stderr ?? ""
+    if (cancelled) {
+      result.stopReason = "aborted"
+      result.exitCode = 1
+    } else if (result.stopReason === "error" || result.stopReason === "aborted") {
+      result.exitCode = 1
+    }
+    result.elapsed = (Date.now() - result.startedAt) / 1000
+    if (tmpDir) await fs.promises.rm(tmpDir, { recursive: true, force: true })
   }
+  return result
 }
 
-/** Extract the final assistant text from messages. */
 export function getFinalOutput(messages: Message[]): string {
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i]
-    if (msg && msg.role === "assistant") {
-      for (const part of msg.content) {
-        if (typeof part !== "string" && part.type === "text") return part.text
-      }
+    if (msg?.role === "assistant") {
+      return msg.content.filter((part) => typeof part !== "string" && part.type === "text")
+        .map((part) => (part as { text: string }).text).join("\n")
     }
   }
   return ""
 }
 
-/** Extract display items (text + tool calls) from messages. */
 export type DisplayItem =
   | { type: "text"; text: string }
   | { type: "toolCall"; name: string; args: Record<string, any> }
@@ -311,13 +280,11 @@ export type DisplayItem =
 export function getDisplayItems(messages: Message[]): DisplayItem[] {
   const items: DisplayItem[] = []
   for (const msg of messages) {
-    if (msg.role === "assistant") {
-      for (const part of msg.content) {
-        if (typeof part === "string") continue
-        if (part.type === "text") items.push({ type: "text", text: part.text })
-        else if (part.type === "toolCall")
-          items.push({ type: "toolCall", name: part.name, args: part.arguments })
-      }
+    if (msg.role !== "assistant") continue
+    for (const part of msg.content) {
+      if (typeof part === "string") continue
+      if (part.type === "text") items.push({ type: "text", text: part.text })
+      else if (part.type === "toolCall") items.push({ type: "toolCall", name: part.name, args: part.arguments })
     }
   }
   return items

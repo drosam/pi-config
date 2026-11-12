@@ -1,0 +1,185 @@
+import { afterEach, describe, expect, test, vi } from "vitest"
+import { getKeybindings, visibleWidth } from "@mariozechner/pi-tui"
+import { cleanTaskText, openTaskPicker, renderFleetLines } from "./fleet.js"
+import type { TaskRecord } from "./types.js"
+
+function task(overrides: Partial<TaskRecord> = {}): TaskRecord {
+  return { id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", ownerId: "parent", agent: "explore", agentSource: "user", description: "Find code", prompt: "work", cwd: "/repo", sessionFile: "/tmp/task.jsonl", run: 1, status: "running", background: true, createdAt: 0, startedAt: 0, ...overrides }
+}
+
+const theme = { fg: (_tone: string, text: string) => text, bold: (text: string) => text, bg: (_tone: string, text: string) => text }
+const actions = () => ({ inspect: vi.fn().mockResolvedValue("transcript"), resume: vi.fn(), steer: vi.fn(), cancel: vi.fn(), toggle: vi.fn() })
+
+afterEach(() => { vi.useRealTimers() })
+
+describe("fleet widget", () => {
+  test("hides an idle fleet and renders a tree without IDs", () => {
+    expect(renderFleetLines([])).toEqual([])
+    expect(renderFleetLines([task({ status: "completed", finishedAt: 0, notifiedRun: 1 })], { now: 60_000 })).toEqual([])
+    const lines = renderFleetLines([task({ lastActivity: "bash sleep 60" })], { now: 12_000, width: 72 })
+    expect(lines[0]).toBe("● Agents  1 running")
+    expect(lines[1]).toMatch(/^└─ \S explore  Find code · 12s$/)
+    expect(lines[2]).toBe("     └ bash sleep 60")
+    expect(lines.join("\n")).not.toContain("aaaaaaaa")
+  })
+
+  test("collapses queued work, lingers finished rows, and colors states", () => {
+    const tones: string[] = []
+    const colored = { ...theme, fg: (tone: string, text: string) => { tones.push(tone); return text } }
+    const tasks = [
+      task({ id: "q1", status: "queued" }), task({ id: "q2", status: "queued" }),
+      task({ id: "w", status: "waiting", lastActivity: "permission" }),
+      task({ id: "f", status: "failed", finishedAt: 60_000 }),
+    ]
+    const lines = renderFleetLines(tasks, { now: 65_000, width: 80, theme: colored }).join("\n")
+    expect(lines).toContain("1 running · 2 queued · 1 new")
+    expect(lines).toContain("needs input: permission")
+    expect(lines).toContain("✗ explore")
+    expect(lines).toContain("└─ ◦ 2 queued")
+    expect(tones).toContain("warning")
+    expect(tones).toContain("error")
+    expect(renderFleetLines(tasks, { now: 70_000, width: 80 }).join("\n")).not.toContain("✗")
+  })
+
+  test("focused fleet marks the selected row and shows navigation hints", () => {
+    const tasks = [task({ id: "a", description: "first" }), task({ id: "b", description: "second", startedAt: 1 })]
+    const lines = renderFleetLines(tasks, { now: 1000, width: 100, focused: true, selectedId: "b" })
+    expect(lines[0]).toContain("enter open")
+    expect(lines.find((line) => line.includes("second"))).toContain("❯")
+    expect(lines.find((line) => line.includes("first"))).not.toContain("❯")
+  })
+
+  test("sanitizes terminal controls and bounds fleet height and width", () => {
+    expect(cleanTaskText("\x1b[31mcat\x1b[0m\n猫\t\x00")).toBe("cat 猫 ")
+    const tasks = Array.from({ length: 20 }, (_, i) => task({ description: `worker ${i} ${"猫".repeat(50)}` }))
+    for (const width of [1, 12, 24, 48, 80, 120]) {
+      const lines = renderFleetLines(tasks, { now: 1000, width })
+      expect(lines.length).toBeLessThanOrEqual(14)
+      for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width)
+    }
+    expect(renderFleetLines(tasks, { now: 1000, width: 80 }).join("\n")).toContain("+14 more")
+  })
+
+  test("ANSI styling preserves terminal width and follows the supplied theme", () => {
+    const colored = { fg: (_tone: string, text: string) => `\x1b[36m${text}\x1b[39m`, bold: (text: string) => `\x1b[1m${text}\x1b[22m` }
+    const tasks = [task({ description: "Inspect 猫" })]
+    for (const width of [1, 24, 48, 80]) {
+      const lines = renderFleetLines(tasks, { now: 1000, width, theme: colored })
+      for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width)
+    }
+    expect(renderFleetLines(tasks, { now: 1000, width: 80, theme: colored }).join("\n")).toContain("\x1b[")
+    expect(renderFleetLines(tasks, { now: 1000, width: 80, theme }).join("\n")).not.toContain("\x1b[")
+  })
+
+  test("renders a stable compact preview", () => {
+    const lines = renderFleetLines([
+      task({ description: "Audit payment flow", lastActivity: "read src/pay.ts" }),
+      task({ id: "other", agent: "general", description: "Check retry policy", status: "waiting", startedAt: 1 }),
+    ], { now: 18_000, width: 64 })
+    expect(lines).toEqual([
+      "● Agents  2 running",
+      "├─ ⠋ explore  Audit payment flow · 18s",
+      "│    └ read src/pay.ts",
+      "└─ ◆ general  Check retry policy · 17s",
+      "     └ needs input",
+    ])
+  })
+})
+
+describe("task browser integration", () => {
+  test("RPC fallback retains resume actions without exposing task IDs", async () => {
+    const record = task({ status: "completed", finishedAt: 0 })
+    const label = "1. Find code (explore, Done, 0s)"
+    const select = vi.fn().mockResolvedValueOnce(label).mockResolvedValueOnce("Resume").mockResolvedValueOnce(undefined)
+    const ctx = { hasUI: true, mode: "rpc", ui: { select, editor: vi.fn().mockResolvedValue("follow up"), notify: vi.fn() } } as any
+    const controls = actions()
+    await openTaskPicker(ctx, () => [record], controls)
+    expect(controls.resume).toHaveBeenCalledWith(record, "follow up")
+    expect(select.mock.calls[1][1]).toEqual(["Inspect transcript", "Resume"])
+  })
+
+  test("TUI browser resumes with one shortcut and keeps search state across reopen", async () => {
+    const controls = actions()
+    const record = task({ status: "completed", finishedAt: 0 })
+    const frames: string[] = []
+    let opened = 0
+    const ctx = {
+      hasUI: true, mode: "tui", ui: {
+        editor: vi.fn().mockResolvedValue("follow up"), notify: vi.fn(),
+        custom: vi.fn(async (factory: any) => {
+          let component: any
+          const result = new Promise((resolve) => {
+            component = factory({ terminal: { columns: 100, rows: 30 }, requestRender: vi.fn() }, theme, getKeybindings(), resolve)
+            component.focused = true
+            if (opened++ === 0) {
+              component.handleInput("F")
+              frames.push(component.render(94).join("\n"))
+              component.handleInput("\x1br")
+            } else {
+              frames.push(component.render(94).join("\n"))
+              component.handleInput("\x1b")
+            }
+          })
+          try { return await result } finally { component.dispose() }
+        }),
+      },
+    } as any
+    await openTaskPicker(ctx, () => [record], controls)
+    expect(controls.resume).toHaveBeenCalledWith(record, "follow up")
+    expect(ctx.ui.custom).toHaveBeenCalledTimes(2)
+    expect(frames.every((frame) => frame.includes("Find code"))).toBe(true)
+    expect(frames[1]).not.toContain(record.id)
+  })
+
+  test("inspection wraps transcript lines and returns to the same task", async () => {
+    const controls = actions()
+    controls.inspect.mockResolvedValue("first line\n" + "abcdefghijklmnopqrst".repeat(4))
+    const record = task({ status: "completed", finishedAt: 0 })
+    const frames: string[][] = []
+    let opened = 0
+    const ctx = {
+      hasUI: true, mode: "tui", ui: {
+        custom: async (factory: any) => {
+          let component: any
+          const result = new Promise((resolve) => {
+            component = factory({ terminal: { columns: 100, rows: 30 }, requestRender: vi.fn() }, theme, getKeybindings(), resolve)
+            if (opened++ === 0) { component.render(94); component.handleInput("\r") }
+            else if (opened === 2) {
+              frames.push(component.render(20))
+              component.handleInput("\x1b[6~")
+              component.handleInput("\x1b")
+            } else { component.render(94); component.handleInput("\x1b") }
+          })
+          try { return await result } finally { component.dispose?.() }
+        },
+      },
+    } as any
+    await openTaskPicker(ctx, () => [record], controls)
+    expect(controls.inspect).toHaveBeenCalledWith(record)
+    expect(opened).toBe(3)
+    expect(frames[0].filter((line) => /^  [a-t]{16}  $/.test(line))).toHaveLength(5)
+    for (const line of frames[0]) expect(visibleWidth(line)).toBeLessThanOrEqual(20)
+  })
+
+  test("aborting the browser closes its modal and releases refresh timers", async () => {
+    vi.useFakeTimers()
+    const controller = new AbortController()
+    const controls = actions()
+    const ctx = {
+      hasUI: true, mode: "tui", ui: {
+        custom: async (factory: any) => {
+          let component: any
+          const result = new Promise((resolve) => {
+            component = factory({ terminal: { columns: 100, rows: 30 }, requestRender: vi.fn() }, theme, getKeybindings(), resolve)
+          })
+          expect(vi.getTimerCount()).toBe(1)
+          controller.abort()
+          try { return await result } finally { component.dispose() }
+        },
+      },
+    } as any
+    await openTaskPicker(ctx, () => [task()], controls, controller.signal)
+    expect(vi.getTimerCount()).toBe(0)
+    expect(controls.resume).not.toHaveBeenCalled()
+  })
+})
