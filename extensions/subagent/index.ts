@@ -124,8 +124,8 @@ export default function(pi: ExtensionAPI) {
   }
 
   const fleetActions = (ctx: ExtensionContext, tasks: TaskManager): FleetActions => ({
-    inspect: async (task) => {
-      const text = await inspectTask(tasks.get(task.id))
+    inspect: async (task, options) => {
+      const text = await inspectTask(tasks.get(task.id), options)
       if (!isActiveTask(tasks.get(task.id))) tasks.consume(task.id)
       return text
     },

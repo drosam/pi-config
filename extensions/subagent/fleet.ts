@@ -1,13 +1,14 @@
 import type { ExtensionContext } from "@mariozechner/pi-coding-agent"
 import { Text, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui"
 import { isActiveTask, type TaskRecord } from "./types.js"
-import { alignedLine, cleanTaskText, elapsedTask, paint, taskState } from "./fleet-view.js"
+import { alignedLine, cleanTaskText, elapsedTask, taskState, usageLabel } from "./fleet-view.js"
+import type { TranscriptOptions } from "./transcript.js"
 import { TaskBrowser, type BrowserAction, type BrowserState } from "./task-browser.js"
 
 export { cleanTaskText, fleetRows, renderFleetLines } from "./fleet-view.js"
 
 export interface FleetActions {
-  inspect(task: TaskRecord): Promise<string>
+  inspect(task: TaskRecord, options?: TranscriptOptions): Promise<string>
   resume(task: TaskRecord, prompt: string): Promise<void>
   steer(task: TaskRecord, message: string): Promise<void>
   cancel(task: TaskRecord): Promise<void>
@@ -17,44 +18,42 @@ export interface FleetActions {
 type UiContext = Pick<ExtensionContext, "mode" | "hasUI" | "ui">
 type ViewerAction = "steer" | "cancel" | "resume" | undefined
 
-const ROLE = /^(user|assistant|toolResult(?: \(.+\))?):$/
-
-function styleTranscript(text: string, theme: Parameters<typeof paint>[0]): string {
-  return text.split("\n").map((line) => {
-    const clean = cleanTaskText(line)
-    const role = clean.match(ROLE)?.[1]
-    if (!role) return clean
-    return paint(theme, role === "assistant" ? "accent" : role === "user" ? "warning" : "dim", clean)
-  }).join("\n")
-}
-
 /** Live, auto-following transcript overlay. Returns the follow-up action the user picked. */
 async function viewTask(
   ctx: UiContext, taskId: string, getTask: (id: string) => TaskRecord | undefined,
-  inspect: (task: TaskRecord) => Promise<string>, initial: string, signal?: AbortSignal,
+  inspect: FleetActions["inspect"], signal?: AbortSignal,
 ): Promise<ViewerAction> {
   let columns = () => 100
   return ctx.ui.custom<ViewerAction>((tui, theme, keys, done) => {
     columns = () => Math.max(1, Math.min(120, Math.floor(tui.terminal.columns * 0.94)))
-    const content = new Text(styleTranscript(initial, theme), 0, 0)
+    const content = new Text("loading...", 0, 0)
     let offset = 0
     let follow = true
+    let expanded = false
     let loading = false
+    let stale = true
     let closed = false
     const finish = (action: ViewerAction) => { if (!closed) { closed = true; done(action) } }
     const close = () => finish(undefined)
     signal?.addEventListener("abort", close, { once: true })
-    const timer = setInterval(() => {
+    const refresh = () => {
       const task = getTask(taskId)
       if (!task || loading) return
-      tui.requestRender()
-      if (!isActiveTask(task) && task.finishedAt !== undefined && Date.now() - task.finishedAt > 2000) return
       loading = true
-      void inspect(task).then((text) => {
+      stale = false
+      void inspect(task, { theme, expanded }).then((text) => {
         if (closed) return
-        content.setText(styleTranscript(text, theme))
+        content.setText(text)
         tui.requestRender()
       }).catch(() => {}).finally(() => { loading = false })
+    }
+    refresh()
+    const timer = setInterval(() => {
+      const task = getTask(taskId)
+      if (!task) return
+      tui.requestRender()
+      const settled = !isActiveTask(task) && task.finishedAt !== undefined && Date.now() - task.finishedAt > 2000
+      if (!settled || stale) refresh()
     }, 1000)
     const viewport = () => Math.max(1, Math.floor(tui.terminal.rows * 0.85) - 6)
     return {
@@ -67,18 +66,20 @@ async function viewTask(
         const maxOffset = Math.max(0, lines.length - height)
         offset = follow ? maxOffset : Math.min(offset, maxOffset)
         const state = task ? taskState(task) : undefined
+        const usage = task ? usageLabel(task) : ""
         const header = task
           ? alignedLine(`${theme.bold(cleanTaskText(task.agent))}  ${cleanTaskText(task.description)}`,
-            paint(theme, state!.tone, `${state!.label} · ${elapsedTask(task)}`), inner)
+            `${usage ? theme.fg("dim", `${usage} · `) : ""}${theme.fg(state!.tone, `${state!.label} · ${elapsedTask(task)}`)}`, inner)
           : theme.fg("dim", "Task no longer available")
         const active = task && isActiveTask(task)
         const actions = [
           active && task.status !== "queued" ? "s steer" : "", active ? "x cancel" : "", task && !active ? "r resume" : "",
-          follow ? "following" : "e follow", `${keys.getKeys("tui.select.cancel")[0] ?? "esc"} back`,
+          expanded ? "o collapse" : "o expand", follow ? "following" : "e follow", `${keys.getKeys("tui.select.cancel")[0] ?? "esc"} back`,
         ].filter(Boolean).join(" · ")
         const body = [...lines.slice(offset, offset + height)]
         while (body.length < Math.min(height, lines.length)) body.push("")
-        const out = [header, paint(theme, "borderMuted", "─".repeat(inner)), ...body, paint(theme, "borderMuted", "─".repeat(inner)), paint(theme, "dim", actions)]
+        const rule = theme.fg("borderMuted", "─".repeat(inner))
+        const out = [header, rule, ...body, rule, theme.fg("dim", actions)]
         return ["", ...out, ""].map((line) => {
           const clipped = truncateToWidth(line, inner, "")
           return theme.bg("customMessageBg", " ".repeat(inset) + clipped + " ".repeat(Math.max(0, width - inset - visibleWidth(clipped))))
@@ -90,6 +91,13 @@ async function viewTask(
         if (task && isActiveTask(task) && task.status !== "queued" && data === "s") { finish("steer"); return }
         if (task && isActiveTask(task) && data === "x") { finish("cancel"); return }
         if (task && !isActiveTask(task) && data === "r") { finish("resume"); return }
+        if (data === "o") {
+          expanded = !expanded
+          stale = true
+          refresh()
+          tui.requestRender()
+          return
+        }
         const page = viewport()
         if (keys.matches(data, "tui.select.up")) { follow = false; offset = Math.max(0, offset - 1) }
         else if (keys.matches(data, "tui.select.down")) offset++
@@ -117,13 +125,12 @@ export async function openTaskViewer(
   if (!ctx.hasUI || signal?.aborted) return
   while (!signal?.aborted) {
     const current = getTask(task.id) ?? task
-    const text = await actions.inspect(current)
-    if (signal?.aborted) return
     if (ctx.mode !== "tui") {
-      ctx.ui.notify(`Transcript: ${current.sessionFile}`, "info")
+      await actions.inspect(current)
+      if (!signal?.aborted) ctx.ui.notify(`Transcript: ${current.sessionFile}`, "info")
       return
     }
-    const action = await viewTask(ctx, task.id, getTask, actions.inspect, text, signal)
+    const action = await viewTask(ctx, task.id, getTask, actions.inspect, signal)
     const latest = getTask(task.id) ?? current
     if (!action || signal?.aborted) return
     try {

@@ -47,6 +47,29 @@ export function elapsedTask(task: TaskRecord, now = Date.now()): string {
   return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, "0")}s`
 }
 
+export function formatTokens(count: number): string {
+  if (count < 1000) return String(count)
+  if (count < 1_000_000) return `${(count / 1000).toFixed(count < 10_000 ? 1 : 0)}k`
+  return `${(count / 1_000_000).toFixed(1)}M`
+}
+
+/** Context size of the worker's latest turn, e.g. `12.3k tok`; empty before the first turn ends. */
+export function tokenLabel(task: TaskRecord): string {
+  const tokens = task.result?.usage.contextTokens ?? 0
+  return tokens > 0 ? `${formatTokens(tokens)} tok` : ""
+}
+
+/** Token and cost details for wider views. */
+export function usageLabel(task: TaskRecord): string {
+  const usage = task.result?.usage
+  if (!usage || usage.turns === 0) return ""
+  return [
+    usage.contextTokens ? `${formatTokens(usage.contextTokens)} ctx` : "",
+    `↑${formatTokens(usage.input + usage.cacheRead + usage.cacheWrite)} ↓${formatTokens(usage.output)}`,
+    usage.cost > 0 ? `$${usage.cost.toFixed(usage.cost < 1 ? 3 : 2)}` : "",
+  ].filter(Boolean).join(" · ")
+}
+
 export function alignedLine(left: string, right: string, width: number): string {
   width = Math.max(0, Math.floor(width))
   if (width < 24 || visibleWidth(right) + 8 >= width) return truncateToWidth(left, width, "")
@@ -101,7 +124,8 @@ export function renderFleetLines(tasks: readonly TaskRecord[], options: FleetRen
     const prefix = `${paint(theme, "borderMuted", last ? "└─" : "├─")}${marker} ${icon} `
     const agent = cleanTaskText(task.agent)
     const agentText = theme ? theme.bold(agent) : agent
-    const suffix = ` · ${elapsedTask(task, now)}`
+    const tokens = tokenLabel(task)
+    const suffix = `${tokens ? ` · ${tokens}` : ""} · ${elapsedTask(task, now)}`
     const room = width - visibleWidth(prefix) - visibleWidth(agent) - 2 - visibleWidth(suffix)
     const description = room > 3 ? truncateToWidth(cleanTaskText(task.description), room, "...") : ""
     const tone: Tone = selected || !focused ? "text" : "muted"

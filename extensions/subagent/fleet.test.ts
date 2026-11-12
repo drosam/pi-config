@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test, vi } from "vitest"
 import { getKeybindings, visibleWidth } from "@mariozechner/pi-tui"
 import { cleanTaskText, openTaskPicker, renderFleetLines } from "./fleet.js"
 import type { TaskRecord } from "./types.js"
+import { usageLabel } from "./fleet-view.js"
 
 function task(overrides: Partial<TaskRecord> = {}): TaskRecord {
   return { id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", ownerId: "parent", agent: "explore", agentSource: "user", description: "Find code", prompt: "work", cwd: "/repo", sessionFile: "/tmp/task.jsonl", run: 1, status: "running", background: true, createdAt: 0, startedAt: 0, ...overrides }
@@ -39,6 +40,14 @@ describe("fleet widget", () => {
     expect(tones).toContain("warning")
     expect(tones).toContain("error")
     expect(renderFleetLines(tasks, { now: 70_000, width: 80 }).join("\n")).not.toContain("✗")
+  })
+
+  test("shows worker context size once a turn has finished", () => {
+    const usage = { input: 900, output: 300, cacheRead: 11_000, cacheWrite: 0, cost: 0.0123, contextTokens: 12_345, turns: 2 }
+    const lines = renderFleetLines([task({ result: { usage } as any })], { now: 5000, width: 80 })
+    expect(lines[1]).toContain("Find code · 12k tok · 5s")
+    expect(usageLabel(task({ result: { usage } as any }))).toBe("12k ctx · ↑12k ↓300 · $0.012")
+    expect(renderFleetLines([task()], { now: 5000, width: 80 })[1]).not.toContain("tok")
   })
 
   test("focused fleet marks the selected row and shows navigation hints", () => {
@@ -145,9 +154,11 @@ describe("task browser integration", () => {
             component = factory({ terminal: { columns: 100, rows: 30 }, requestRender: vi.fn() }, theme, getKeybindings(), resolve)
             if (opened++ === 0) { component.render(94); component.handleInput("\r") }
             else if (opened === 2) {
-              frames.push(component.render(20))
-              component.handleInput("\x1b[6~")
-              component.handleInput("\x1b")
+              setTimeout(() => {
+                frames.push(component.render(20))
+                component.handleInput("\x1b[6~")
+                component.handleInput("\x1b")
+              }, 0)
             } else { component.render(94); component.handleInput("\x1b") }
           })
           try { return await result } finally { component.dispose?.() }
@@ -155,7 +166,7 @@ describe("task browser integration", () => {
       },
     } as any
     await openTaskPicker(ctx, () => [record], controls)
-    expect(controls.inspect).toHaveBeenCalledWith(record)
+    expect(controls.inspect).toHaveBeenCalledWith(record, expect.objectContaining({ expanded: false }))
     expect(opened).toBe(3)
     expect(frames[0].filter((line) => /^  [a-t]{16}  $/.test(line))).toHaveLength(5)
     for (const line of frames[0]) expect(visibleWidth(line)).toBeLessThanOrEqual(20)
