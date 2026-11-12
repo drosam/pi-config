@@ -27,7 +27,7 @@ const { loadExtensions } = await importHost("dist/core/extensions/loader.js");
 const { SessionManager } = await importHost("dist/core/session-manager.js");
 const { convertToLlm } = await importHost("dist/core/messages.js");
 const aiRoot = "node_modules/@earendil-works/pi-ai/dist";
-const { initTheme, theme } = await importHost("dist/modes/interactive/theme/theme.js");
+const { initTheme, setTheme, theme } = await importHost("dist/modes/interactive/theme/theme.js");
 const { CURSOR_MARKER, matchesKey, visibleWidth } = await importHost("node_modules/@earendil-works/pi-tui/dist/index.js");
 initTheme("dark", false);
 const extensionPath = resolve(dirname(fileURLToPath(import.meta.url)), "../btw.ts");
@@ -395,8 +395,7 @@ test("panel is framed, width-capped, responsive, and keeps composer visible", as
 	assert.match(framed.at(-1)!, /^╰─+╯$/);
 	assert.match(framed.at(-3)!, /^│ btw ─+ enter send · esc close · alt\+l clear │$/);
 	assert.match(framed.at(-2)!, /^│ > /);
-	assert.ok(lines.every((line: string) => line.startsWith("\u001b[48;5;16m")), "panel has solid background");
-	assert.ok(lines.every((line: string) => !/\u001b\[0m(?!\u001b\[48|$)/.test(line)), "background survives inner resets");
+	assert.ok(lines.every((line: string) => line.startsWith(theme.getFgAnsi("text") + "\u001b[49m")), "panel uses theme text and main chat background");
 	for (const rows of [2, 6, 12, 40]) {
 		h.ui.rows = rows;
 		for (const width of [1, 12, 40, 90]) {
@@ -408,6 +407,43 @@ test("panel is framed, width-capped, responsive, and keeps composer visible", as
 	}
 	h.press("\u001b");
 	await open;
+});
+
+test("panel follows theme changes for background, text, prompt, empty state and Markdown", async () => {
+	const h = await setup();
+	const open = h.invoke();
+	try {
+		for (const name of ["light", "system", "dark"]) {
+			assert.equal(setTheme(name).success, true);
+			h.ui.component.invalidate();
+			for (const width of [12, 90]) {
+				const lines = h.ui.component.render(width);
+				const fg = theme.getFgAnsi("text");
+				const bg = "\u001b[49m";
+				assert.ok(lines.every((line: string) => line.startsWith(fg + bg)), `${name}: main chat surface`);
+				assert.ok(lines.every((line: string) => !/\u001b\[48[;:]/.test(line)), `${name}: no highlighted panel background`);
+				assert.ok(lines.join("\n").includes(theme.fg("accent", "> ")), `${name}: prompt`);
+				assert.ok(lines.every((line: string) => !line.slice(0, -4).includes("\u001b[0m") || line.includes("\u001b[0m" + fg + bg)), `${name}: full resets restore surface`);
+				if (width === 90) assert.ok(lines.join("\n").includes(theme.getFgAnsi("dim") + "Ask a side question below."), `${name}: empty state`);
+			}
+		}
+		h.state.response = answer("Plain text and **bold** and `code`");
+		h.press("Theme question");
+		h.press("\r");
+		await tick();
+		for (const name of ["light", "dark", "system"]) {
+			assert.equal(setTheme(name).success, true);
+			h.ui.component.invalidate();
+			const raw = h.ui.component.render(90).join("\n");
+			assert.ok(raw.includes(theme.fg("mdCode", "code")), `${name}: Markdown`);
+			assert.match(h.render(), /Plain text and bold and code/);
+			assert.ok(raw.includes("\u001b[39m" + theme.getFgAnsi("text")), `${name}: foreground resets restore text`);
+		}
+	} finally {
+		h.press("\u001b");
+		await open;
+		setTheme("dark");
+	}
 });
 
 test("follow-up history eviction keeps the newest turn visible", async () => {

@@ -46,13 +46,17 @@ export default function (pi: ExtensionAPI) {
 			await ctx.ui.custom<void>((tui, theme, keys, done) => {
 				getWidth = () => Math.max(1, Math.min(140, Math.floor(tui.terminal.columns * 0.95)));
 				let notice = "";
-				const input = new Input({ prompt: theme.fg("accent", "> "), placeholder: "Ask a follow-up...", placeholderStyle: (text) => theme.fg("dim", text) });
+				const input = new Input({ prompt: "> ", placeholder: "Ask a follow-up...", placeholderStyle: (text) => theme.fg("dim", text) });
 				const barred = (child: Component, color: "accent" | "borderMuted"): Component => ({
 					render: (width) => child.render(Math.max(1, width - 2)).map((line) => theme.fg(color, "▌") + " " + line),
 					invalidate: () => child.invalidate(),
 				});
-				const bg = "\u001b[48;5;16m";
-				const paint = (line: string) => bg + line.replace(/\u001b\[(0|49)?m/g, (reset) => reset + bg) + "\u001b[0m";
+				const paint = (line: string) => {
+					const fg = theme.getFgAnsi("text");
+					const bg = "\u001b[49m";
+					return fg + bg + line.replace(/\u001b\[(0|49|39|22;39)?m/g, (reset, code) =>
+						reset + (code === "49" ? bg : code === "39" || code === "22;39" ? fg : fg + bg)) + "\u001b[0m";
+				};
 				// Paste places the cursor after restored text; setValue would leave it at the start.
 				const fill = (value: string) => { input.setValue(""); input.handleInput(`\u001b[200~${value}\u001b[201~`); };
 				fill(draft);
@@ -119,6 +123,7 @@ export default function (pi: ExtensionAPI) {
 						const innerWidth = Math.max(1, width - (compact ? 0 : 4));
 						sync();
 						const content = scroll.render(innerWidth);
+						const composer = input.render(innerWidth).map((line) => line.replace(/^> ?/, (prompt) => theme.fg("accent", prompt)));
 						scroll.updateLayout(content.length, Math.max(0, rows - (compact ? 2 : 4)), () => tui.requestRender());
 						const visible = content.slice(scroll.scrollTop, scroll.scrollTop + scroll.viewportHeight);
 						// Bottom-anchor the transcript so the newest turn sits just above the composer.
@@ -135,7 +140,7 @@ export default function (pi: ExtensionAPI) {
 							return text + " ".repeat(Math.max(0, size - visibleWidth(text)));
 						};
 						if (compact) {
-							return [...transcript, rule, ...input.render(innerWidth)].slice(-rows).map((line) => paint(pad(line, width)));
+							return [...transcript, rule, ...composer].slice(-rows).map((line) => paint(pad(line, width)));
 						}
 						const edge = (text: string) => theme.fg("borderMuted", text);
 						const frame = (line: string) => edge("│ ") + pad(line, innerWidth) + edge(" │");
@@ -143,7 +148,7 @@ export default function (pi: ExtensionAPI) {
 						const top = width >= title.length + 4
 							? edge("╭─") + theme.fg("dim", title) + edge(`${"─".repeat(width - title.length - 3)}╮`)
 							: edge(`╭${"─".repeat(width - 2)}╮`);
-						return [top, ...transcript.map(frame), frame(rule), ...input.render(innerWidth).map(frame), edge(`╰${"─".repeat(width - 2)}╯`)].map(paint);
+						return [top, ...transcript.map(frame), frame(rule), ...composer.map(frame), edge(`╰${"─".repeat(width - 2)}╯`)].map(paint);
 					},
 					handleInput(data: string) {
 						if (keys.matches(data, "tui.select.cancel")) { close(); return; }
@@ -168,7 +173,11 @@ export default function (pi: ExtensionAPI) {
 						}
 						tui.requestRender();
 					},
-					invalidate() { body.invalidate(); input.invalidate(); },
+					invalidate() {
+						empty.setText(theme.fg("dim", "Ask a side question below. This conversation stays out of the main chat."));
+						body.invalidate();
+						input.invalidate();
+					},
 				};
 			}, { overlay: true, overlayOptions: () => ({ width: getWidth(), maxHeight: "80%", anchor: "center" }) });
 		} finally {
