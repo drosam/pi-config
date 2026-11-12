@@ -1,6 +1,6 @@
 # Pi configuration
 
-This repository (`~/Developer/pi-config`) is linked into `~/.pi/agent/` by the dotfiles installer with `stow -d ~/Developer -t ~/.pi/agent pi-config`. `~/.pi/agent` stays a real directory, so runtime files (auth, sessions, `keybindings.json`, `trust.json`) never land here.
+This repository holds Pi agent configuration. Link its contents into `~/.pi/agent/` (for example, from this repo's parent directory: `stow -t ~/.pi/agent pi-config`). Keep `~/.pi/agent` a real directory, so runtime files (auth, sessions, `keybindings.json`, `trust.json`) never land here.
 
 - Pi-specific skills and agents: `skills/` and `agents/` here.
 - Shared skills and agents: the [`agents`](https://github.com/drosam/agents) repository, linked into `~/.agents/skills/` and `~/.agents/agents/`. Pi discovers `~/.agents/skills/` natively; the subagent extension reads `~/.agents/agents/`, and a same-named agent here overrides a shared one.
