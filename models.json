@@ -6,29 +6,29 @@
       },
       "modelOverrides": {
         "claude-opus-5-5": {
-          "contextWindow": 250000
+          "contextWindow": 500000
         },
         "claude-sonnet-5-5": {
-          "contextWindow": 250000
+          "contextWindow": 500000
         },
         "claude-fable-5-2": {
-          "contextWindow": 250000
+          "contextWindow": 500000
         }
       }
     },
     "openai-codex": {
       "modelOverrides": {
         "gpt-6.1-sol": {
-          "contextWindow": 250000
+          "contextWindow": 500000
         },
         "gpt-6.1-terra": {
-          "contextWindow": 250000
+          "contextWindow": 500000
         },
         "gpt-6-luna": {
-          "contextWindow": 250000
+          "contextWindow": 500000
         },
         "gpt-6-astra": {
-          "contextWindow": 250000
+          "contextWindow": 500000
         }
       }
     }
