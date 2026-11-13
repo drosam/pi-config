@@ -71,6 +71,7 @@
   },
   "special": {
     "external_directory": "ask",
+    "external_directory:/Users/david/.agent-work/*": "allow",
     "doom_loop": "deny"
   }
 }
