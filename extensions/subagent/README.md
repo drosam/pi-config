@@ -68,7 +68,7 @@ Transcript viewing wraps long lines and supports arrow-key and page scrolling. T
 
 ## Lifecycle and storage
 
-- At most four workers run concurrently per parent process; excess calls queue. Nested workers have their own parent-local limit, not a global machine-wide limit.
+- At most fifteen workers run concurrently per parent process; excess calls queue. Nested workers have their own parent-local limit, not a global machine-wide limit.
 - Each parent owns its task IDs. Metadata follows its active session branch. Tasks from another parent session, including a fork, are not adopted.
 - Child Pi sessions live in `~/.pi/agent/task-sessions/<parent-hash>/<task-id>.jsonl` (respecting `PI_CODING_AGENT_DIR`). Metadata is saved in the parent session, not this repository.
 - Reload, branch navigation, session replacement, and shutdown cancel owned workers. Recovered active work is marked `interrupted`; nothing restarts automatically. Explicit resume can continue a saved conversation.

@@ -6,6 +6,9 @@ import type { AgentConfig } from "./agents.js"
 import { runAgent, getFinalOutput, type AgentControl, type CallerDefaults, type OnProgress, type RunOptions, type RunResult } from "./runner.js"
 import { isActiveTask, type TaskRecord } from "./types.js"
 
+/** Workers running at once per parent session; extra tasks queue. */
+export const DEFAULT_MAX_CONCURRENT = 15
+
 export interface TaskManagerOptions {
   ownerId: string
   cwd: string
@@ -176,7 +179,7 @@ export class TaskManager {
   }
 
   private pump(): void {
-    while (!this.stopped && this.running.size < (this.options.maxConcurrent ?? 4) && this.queue.length) {
+    while (!this.stopped && this.running.size < (this.options.maxConcurrent ?? DEFAULT_MAX_CONCURRENT) && this.queue.length) {
       const job = this.queue.shift()!
       this.running.add(job)
       void this.execute(job)
