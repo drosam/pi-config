@@ -111,7 +111,9 @@ export function renderFleetLines(tasks: readonly TaskRecord[], options: FleetRen
   const hint = focused ? paint(theme, "dim", "↑↓ select · enter open · x cancel · esc back") : ""
   const lines = [hint ? alignedLine(left, hint, width) : truncateToWidth(left, width, "")]
 
-  const shown = rows.slice(0, MAX_ROWS)
+  const selectedIndex = focused ? rows.findIndex((task) => task.id === selectedId) : -1
+  const start = Math.max(0, selectedIndex - MAX_ROWS + 1)
+  const shown = rows.slice(start, start + MAX_ROWS)
   const extra = rows.length - shown.length
   const tail = [extra > 0 ? `+${extra} more` : "", queued ? `${queued} queued` : ""].filter(Boolean)
   const spin = SPINNER[Math.floor(now / 100) % SPINNER.length]

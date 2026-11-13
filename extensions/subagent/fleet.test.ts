@@ -50,6 +50,15 @@ describe("fleet widget", () => {
     expect(renderFleetLines([task()], { now: 5000, width: 80 })[1]).not.toContain("tok")
   })
 
+  test("keeps the selected row visible when more rows exist than fit", () => {
+    const tasks = Array.from({ length: 9 }, (_, i) => task({ id: `t${i}`, description: `worker ${i}`, startedAt: i }))
+    const lines = renderFleetLines(tasks, { now: 1000, width: 100, focused: true, selectedId: "t8" }).join("\n")
+    expect(lines).toContain("❯")
+    expect(lines).toMatch(/❯.*worker 8/)
+    expect(lines).not.toContain("worker 0")
+    expect(lines).toContain("+3 more")
+  })
+
   test("focused fleet marks the selected row and shows navigation hints", () => {
     const tasks = [task({ id: "a", description: "first" }), task({ id: "b", description: "second", startedAt: 1 })]
     const lines = renderFleetLines(tasks, { now: 1000, width: 100, focused: true, selectedId: "b" })
