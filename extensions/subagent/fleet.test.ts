@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest"
 import { getKeybindings, visibleWidth } from "@mariozechner/pi-tui"
-import { cleanTaskText, openTaskPicker, renderFleetLines } from "./fleet.js"
+import { cleanTaskText, framed, openTaskPicker, renderFleetLines } from "./fleet.js"
 import type { TaskRecord } from "./types.js"
 import { usageLabel } from "./fleet-view.js"
 
@@ -104,6 +104,25 @@ describe("fleet widget", () => {
   })
 })
 
+describe("overlay frame", () => {
+  test("draws a titled rounded border with theme text color on the terminal background", () => {
+    const themed = { fg: (_tone: string, text: string) => text, getFgAnsi: () => "\x1b[38;5;7m" }
+    const lines = framed(themed, 20, "tasks", ["hello \x1b[0mworld"])
+    expect(lines.map((line) => line.replace(/\x1b\[[0-9;]*m/g, ""))).toEqual([
+      "╭─ tasks ──────────╮",
+      "│ hello world      │",
+      "╰──────────────────╯",
+    ])
+    for (const line of lines) {
+      expect(visibleWidth(line)).toBe(20)
+      expect(line.startsWith("\x1b[38;5;7m\x1b[49m")).toBe(true)
+      expect(line).not.toContain("\x1b[4" + "0m")
+    }
+    expect(lines[1]).toContain("\x1b[0m\x1b[38;5;7m\x1b[49mworld")
+    expect(framed(themed, 10, "tasks", ["narrow text"]).map(visibleWidth)).toEqual([10])
+  })
+})
+
 describe("task browser integration", () => {
   test("RPC fallback retains resume actions without exposing task IDs", async () => {
     const record = task({ status: "completed", finishedAt: 0 })
@@ -177,7 +196,7 @@ describe("task browser integration", () => {
     await openTaskPicker(ctx, () => [record], controls)
     expect(controls.inspect).toHaveBeenCalledWith(record, expect.objectContaining({ expanded: false }))
     expect(opened).toBe(3)
-    expect(frames[0].filter((line) => /^  [a-t]{16}  $/.test(line))).toHaveLength(5)
+    expect(frames[0].filter((line) => /^│ [a-t]{16} │$/.test(line.replace(/\x1b\[[0-9;]*m/g, "")))).toHaveLength(5)
     for (const line of frames[0]) expect(visibleWidth(line)).toBeLessThanOrEqual(20)
   })
 

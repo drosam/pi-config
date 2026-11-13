@@ -17,6 +17,33 @@ export interface FleetActions {
 
 type UiContext = Pick<ExtensionContext, "mode" | "hasUI" | "ui">
 type ViewerAction = "steer" | "cancel" | "resume" | undefined
+type FrameTheme = { fg(color: "borderMuted" | "dim", text: string): string; getFgAnsi?(color: "text"): string }
+
+/** Content width inside {@link framed} for a given overlay width. */
+export function frameInner(width: number): number {
+  return Math.max(1, width >= 16 ? width - 4 : width)
+}
+
+/** Rounded theme border on the terminal background, matching the btw popup. */
+export function framed(theme: FrameTheme, width: number, title: string, lines: readonly string[]): string[] {
+  const fg = theme.getFgAnsi?.("text") ?? ""
+  const bg = "\x1b[49m"
+  // Re-apply the theme text color and default background after any inner reset.
+  const paint = (line: string) => fg + bg + line.replace(/\x1b\[(0|49|39|22;39)?m/g, (reset, code) =>
+    reset + (code === "49" ? bg : code === "39" || code === "22;39" ? fg : fg + bg)) + "\x1b[0m"
+  const inner = frameInner(width)
+  const pad = (line: string) => {
+    const text = truncateToWidth(line, inner, "")
+    return text + " ".repeat(Math.max(0, inner - visibleWidth(text)))
+  }
+  if (width < 16) return lines.map((line) => paint(pad(line)))
+  const edge = (text: string) => theme.fg("borderMuted", text)
+  const label = ` ${title} `
+  const top = width >= visibleWidth(label) + 4
+    ? edge("╭─") + theme.fg("dim", label) + edge(`${"─".repeat(width - visibleWidth(label) - 3)}╮`)
+    : edge(`╭${"─".repeat(width - 2)}╮`)
+  return [top, ...lines.map((line) => edge("│ ") + pad(line) + edge(" │")), edge(`╰${"─".repeat(width - 2)}╯`)].map(paint)
+}
 
 /** Live, auto-following transcript overlay. Returns the follow-up action the user picked. */
 async function viewTask(
@@ -59,8 +86,7 @@ async function viewTask(
     return {
       render(width) {
         const task = getTask(taskId)
-        const inset = width >= 16 ? 2 : 0
-        const inner = Math.max(1, width - inset * 2)
+        const inner = frameInner(width)
         const height = viewport()
         const lines = content.render(inner)
         const maxOffset = Math.max(0, lines.length - height)
@@ -80,10 +106,7 @@ async function viewTask(
         while (body.length < Math.min(height, lines.length)) body.push("")
         const rule = theme.fg("borderMuted", "─".repeat(inner))
         const out = [header, rule, ...body, rule, theme.fg("dim", actions)]
-        return ["", ...out, ""].map((line) => {
-          const clipped = truncateToWidth(line, inner, "")
-          return theme.bg("customMessageBg", " ".repeat(inset) + clipped + " ".repeat(Math.max(0, width - inset - visibleWidth(clipped))))
-        })
+        return framed(theme, width, "transcript", out)
       },
       handleInput(data) {
         const task = getTask(taskId)
@@ -163,17 +186,11 @@ async function browse(
       get focused() { return browser.focused },
       set focused(value: boolean) { browser.focused = value },
       render(width) {
-        const inset = width >= 16 ? 2 : 0
-        const inner = Math.max(1, width - inset * 2)
         const rows = Math.max(1, Math.floor(tui.terminal.rows * 0.75) - 2)
-        return ["", ...browser.render(inner, rows), ""].map((line) => {
-          const clipped = truncateToWidth(line, inner, "")
-          const padded = " ".repeat(inset) + clipped + " ".repeat(Math.max(0, width - inset - visibleWidth(clipped)))
-          return theme.bg("customMessageBg", padded)
-        })
+        return framed(theme, width, "tasks", browser.render(frameInner(width), rows))
       },
       handleInput: (data) => browser.handleInput(data),
-      handleMouse: (event) => browser.handleMouse({ ...event, x: event.x - (columns() >= 16 ? 2 : 0), y: event.y - 1 }),
+      handleMouse: (event) => browser.handleMouse({ ...event, x: event.x - (columns() >= 16 ? 2 : 0), y: event.y - (columns() >= 16 ? 1 : 0) }),
       invalidate: () => browser.invalidate(),
       dispose() { clearInterval(timer); signal?.removeEventListener("abort", close) },
     }
