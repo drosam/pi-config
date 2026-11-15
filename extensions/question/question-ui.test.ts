@@ -406,6 +406,40 @@ describe("ctrl+s submit", () => {
     expect(r.cancelled).toBe(false)
     expect(r.answers).toEqual([["text"]])
   })
+
+  test("advances to next question before last, submits on last", () => {
+    const q1 = makeQuestion({ multiple: true })
+    const q2 = makeQuestion({ question: "Size", header: "Size", options: [{ label: "S" }] })
+    const { send, getResult } = setup([q1, q2])
+    send(Key.enter) // toggle Red
+    send(Key.ctrl("s")) // advance to Q2
+    expect(getResult()).toBeUndefined()
+    send(Key.enter) // select S -> submit
+    expect(getResult()!.answers).toEqual([["Red"], ["S"]])
+  })
+
+  test("advances from editor mode before last question", () => {
+    const q1 = makeQuestion({ multiple: true, options: [{ label: "A" }] })
+    const q2 = makeQuestion({ question: "Size", header: "Size", options: [{ label: "S" }] })
+    const { send, getResult } = setup([q1, q2])
+    send(Key.down)
+    send(Key.enter) // enter editor
+    for (const ch of "x") send(ch)
+    send(Key.ctrl("s")) // advance to Q2
+    expect(getResult()).toBeUndefined()
+    send(Key.ctrl("s")) // submit on last
+    expect(getResult()!.answers).toEqual([["x"], []])
+  })
+
+  test("footer shows next before last question, submit on last", () => {
+    const q1 = makeQuestion()
+    const q2 = makeQuestion({ question: "Size", header: "Size", options: [{ label: "S" }] })
+    const { send, render } = setup([q1, q2])
+    const plain = () => render().join("\n").replace(/\x1b\[[0-9;]*m/g, "")
+    expect(plain()).toContain("ctrl+s next")
+    send(Key.tab)
+    expect(plain()).toContain("ctrl+s submit")
+  })
 })
 
 // --- Ctrl+C cancel ---

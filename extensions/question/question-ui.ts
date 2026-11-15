@@ -265,7 +265,9 @@ class QuestionPromptComponent {
       }
       if (matchesKey(data, Key.ctrl("s"))) {
         this.editingOther = false
-        this.finish(false)
+        this.syncCurrentAnswers()
+        this.advanceOrSubmit()
+        this.refresh()
         return
       }
       this.editor.handleInput(data)
@@ -306,7 +308,8 @@ class QuestionPromptComponent {
       return
     }
     if (matchesKey(data, Key.ctrl("s"))) {
-      this.finish(false)
+      this.advanceOrSubmit()
+      this.refresh()
       return
     }
   }
@@ -326,6 +329,7 @@ class QuestionPromptComponent {
     const px = 2
     const contentWidth = Math.max(1, width - px * 2)
     const multiple = this.isCurrentQuestionMultiple()
+    const isLastQuestion = this.currentQuestionIndex >= this.questions.length - 1
     const add = (value = "") => lines.push(truncateToWidth(value, contentWidth))
 
     const answers = this.collectAnswers()
@@ -416,7 +420,7 @@ class QuestionPromptComponent {
         action(multiple ? "toggle" : "confirm"),
         divider,
         key("ctrl+s"),
-        action("submit"),
+        action(isLastQuestion ? "submit" : "next"),
         divider,
         key("esc"),
         action("dismiss"),
