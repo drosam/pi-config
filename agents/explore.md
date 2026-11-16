@@ -4,8 +4,8 @@ description: |
   Fast agent for exploring codebases. Use for finding files, searching code, or answering questions about structure. Specify thoroughness: quick, medium, or thorough.
 extensions: true
 model:
-  anthropic: claude-haiku-4-5
-  openai-codex: gpt-5.6-luna
+  anthropic: claude-haiku-5-5
+  openai-codex: gpt-6-luna
 thinking: off
 ---
 
