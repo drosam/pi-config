@@ -373,6 +373,14 @@ describe("render output", () => {
     expect(getResult()!.answers).toEqual([["draft"]])
   })
 
+  test("with context, shows the question and a context hint but not the context", () => {
+    const q = makeQuestion({ question: "Approve draft?", context: "Secret-draft-body" })
+    const output = setup([q]).render().join("\n")
+    expect(output).toContain("Approve draft?")
+    expect(output).toContain("Context is shown in the transcript")
+    expect(output).not.toContain("Secret-draft-body")
+  })
+
   test("single-block question has no transcript hint", () => {
     const output = setup([makeQuestion()]).render().join("\n")
     expect(output).not.toContain("shown in the transcript")

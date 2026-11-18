@@ -57,8 +57,8 @@ describe("question renderCall", () => {
   test("shows only the active question while the prompt is open", async () => {
     const multi = {
       questions: [
-        { question: "First-marker body", header: "One", options: [{ label: "A" }] },
-        { question: "Second-marker body", header: "Two", options: [{ label: "B" }] },
+        { question: "Pick one?", context: "First-marker body", header: "One", options: [{ label: "A" }] },
+        { question: "Pick two?", context: "Second-marker body", header: "Two", options: [{ label: "B" }] },
       ],
     }
     const tool = createQuestionTool({ events: { emit: vi.fn() } } as unknown as ExtensionAPI)
@@ -95,6 +95,23 @@ describe("question renderCall", () => {
     await pending
     expect(row()).toContain("First-marker")
     expect(row()).toContain("Second-marker")
+  })
+
+  test("with context, the open row shows the context but not the question", () => {
+    const tool = createQuestionTool({} as ExtensionAPI)
+    const withContext = {
+      questions: [{ question: "Approve-marker?", context: "Draft-marker", header: "R", options: [] }],
+    }
+    const ctx = (isPartial: boolean, expanded: boolean) =>
+      ({ toolCallId: "call-2", isPartial, expanded, invalidate() {} }) as unknown as Parameters<
+        NonNullable<typeof tool.renderCall>
+      >[2]
+    const open = tool.renderCall!(withContext, theme, ctx(true, false)).render(80).join("\n")
+    expect(open).toContain("Draft-marker")
+    expect(open).not.toContain("Approve-marker")
+    const expanded = tool.renderCall!(withContext, theme, ctx(false, true)).render(80).join("\n")
+    expect(expanded).toContain("Draft-marker")
+    expect(expanded).toContain("Approve-marker")
   })
 
   test("tolerates partially streamed questions", () => {

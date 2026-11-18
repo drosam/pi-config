@@ -9,7 +9,8 @@ Pi extension that registers a `question` tool for interactive clarification.
 Parameters:
 
 - `questions` — array of questions
-  - `question` — full Markdown prompt shown to the user
+  - `question` — short decision prompt shown with the options
+  - `context` — optional Markdown of any length (analysis, evidence, drafts, previews) shown in the transcript
   - `header` — short label used in progress tabs
   - `options` — predefined answer options
     - `label` — visible answer label
@@ -18,9 +19,10 @@ Parameters:
 
 Behavior:
 
-- the complete Markdown question renders in the transcript (scrollable, any length); the selector shows only its final paragraph (last 8 lines at most) above the options
+- `context` renders in the transcript (scrollable, any length) and `question` renders above the options, so nothing is shown twice while the prompt is open
+- without `context`, a multi-paragraph `question` renders fully in the transcript and only its final paragraph (last 8 lines at most) above the options
 - with several questions, the transcript shows only the question on the active tab while the prompt is open
-- completed questions collapse to a compact answer summary and expand to the full question with Pi's `Ctrl+O` tool toggle
+- completed questions collapse to a compact answer summary and expand to context plus question with Pi's `Ctrl+O` tool toggle
 - terminal and bidirectional control characters in question text are removed before rendering
 - questions are **single-select by default**
 - set `multiple: true` to allow **multi-select**

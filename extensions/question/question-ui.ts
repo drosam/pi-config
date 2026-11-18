@@ -11,7 +11,7 @@ import {
   wrapTextWithAnsi,
 } from "@mariozechner/pi-tui"
 import {
-  getQuestionPrompt,
+  getSelectorText,
   normalizeAnswerSelection,
   replaceAnswerSelection,
   sanitizeQuestionText,
@@ -81,7 +81,7 @@ class QuestionPromptComponent {
       this.questionMarkdown.set(
         index,
         new Markdown(
-          sanitizeQuestionText(getQuestionPrompt(question.question)),
+          sanitizeQuestionText(getSelectorText(question)),
           0,
           0,
           createMarkdownTheme(theme),
@@ -125,13 +125,17 @@ class QuestionPromptComponent {
     return this.getCurrentQuestion().options.length + 1
   }
 
-  // The full prompt is rendered in the transcript; the selector shows its final block.
+  // Context is rendered in the transcript; the selector shows the decision line.
   private getQuestionLines(width: number): string[] {
     const lines = this.questionMarkdown.get(this.currentQuestionIndex)?.render(width) ?? []
-    const question = this.getCurrentQuestion().question
+    const question = this.getCurrentQuestion()
+    if (question.context) {
+      const hint = this.theme.fg("dim", "Context is shown in the transcript.")
+      return [...lines, ...wrapTextWithAnsi(hint, width)]
+    }
     const clipped = lines.length > MAX_PROMPT_LINES
     const visible = clipped ? [this.theme.fg("dim", "..."), ...lines.slice(-MAX_PROMPT_LINES)] : lines
-    if (!clipped && getQuestionPrompt(question) === question) return visible
+    if (!clipped && getSelectorText(question) === question.question) return visible
     const hint = this.theme.fg("dim", "Full question is shown in the transcript.")
     return [...visible, ...wrapTextWithAnsi(hint, width)]
   }

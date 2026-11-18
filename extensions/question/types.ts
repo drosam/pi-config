@@ -9,6 +9,7 @@ export interface QuestionOption {
 
 export interface QuestionInput {
   question: string
+  context?: string
   header: string
   options: QuestionOption[]
   multiple?: boolean
@@ -23,6 +24,7 @@ export interface QuestionResultDetails {
   cancelled: boolean
   questions: Array<{
     question: string
+    context?: string
     header: string
     options: string[]
     multiple: boolean

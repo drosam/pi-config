@@ -29,6 +29,20 @@ export function getQuestionPrompt(value: string): string {
   return lines.slice(start).join("\n")
 }
 
+type PromptParts = { question: string; context?: string }
+
+/** Text shown above the options: the question, or the final block of a legacy all-in-one prompt. */
+export function getSelectorText({ question, context }: PromptParts): string {
+  return context ? question : getQuestionPrompt(question)
+}
+
+/** Text shown in the transcript; while open it omits what the selector already shows. */
+export function getTranscriptText({ question, context }: PromptParts, open: boolean): string {
+  if (!open) return [context, question].filter(Boolean).join("\n\n")
+  if (context) return context
+  return getQuestionPrompt(question) === question ? "" : question
+}
+
 export function getQuestionHeader(question: { header: string }, index: number): string {
   return question.header.trim() || `Question ${index + 1}`
 }
@@ -36,6 +50,7 @@ export function getQuestionHeader(question: { header: string }, index: number): 
 export function normalizeQuestions(input: QuestionInput[]): NormalizedQuestion[] {
   return input.map((question) => ({
     question: normalizeQuestionText(question.question),
+    context: question.context ? normalizeQuestionText(question.context) || undefined : undefined,
     header: question.header.trim(),
     multiple: question.multiple === true,
     options: question.options.map((option) => ({

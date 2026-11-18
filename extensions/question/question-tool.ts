@@ -3,6 +3,7 @@ import { Container, Markdown, Spacer, Text } from "@mariozechner/pi-tui"
 import { Type } from "@sinclair/typebox"
 import {
   getQuestionHeader,
+  getTranscriptText,
   normalizeQuestions,
   sanitizeQuestionText,
   summarizeAnswers,
@@ -21,9 +22,14 @@ const OptionSchema = Type.Object({
 
 const QuestionSchema = Type.Object({
   question: Type.String({
-    description:
-      "Complete Markdown prompt of any length, including all background needed to decide; end with the focused question",
+    description: "Short, focused decision prompt shown with the options",
   }),
+  context: Type.Optional(
+    Type.String({
+      description:
+        "Markdown of any length with everything needed to decide (analysis, evidence, drafts, exact previews), shown in the transcript",
+    }),
+  ),
   header: Type.String({ description: "Short label for progress tabs" }),
   options: Type.Array(OptionSchema, { description: "Available predefined options" }),
   multiple: Type.Optional(
@@ -50,12 +56,12 @@ export function createQuestionTool(
     name: "question",
     label: "Question",
     description:
-      "Ask the user one or more questions. The complete Markdown prompt is shown in the transcript and its final paragraph is shown with the options; completed questions collapse to their answers and expand to the full prompt. Questions are single-select by default, support a type-your-own-answer option, and can allow multiple selections when multiple=true. Use this to clarify requirements or gather choices during execution.",
+      "Ask the user one or more questions. Optional Markdown context of any length is shown in the scrollable transcript and the short question is shown with the options; completed questions collapse to their answers and expand to the context and question. Questions are single-select by default, support a type-your-own-answer option, and can allow multiple selections when multiple=true. Use this to clarify requirements or gather choices during execution.",
     promptSnippet:
-      "Ask one or more user questions with complete Markdown prompts, single-select by default, optional multiple selection, and a type-your-own-answer option.",
+      "Ask one or more user questions with optional Markdown context, single-select by default, optional multiple selection, and a type-your-own-answer option.",
     promptGuidelines: [
       "Use this tool when you need clarification, preferences, or implementation choices from the user.",
-      "When a decision depends on analysis, evidence, drafts or previews, put all of that content in the question field, at any length, and end with one focused question. Do not put it in separate narration or private reasoning, and do not refer to content 'above' instead of including it; reasoning is not visible to the user.",
+      "When a decision depends on analysis, evidence, drafts or previews, put all of that content in the context field, at any length, and keep question to the short decision prompt. Do not put it in separate narration or private reasoning, and do not refer to content 'above' instead of including it; reasoning is not visible to the user.",
       "Keep option labels and descriptions concise when the question contains detailed context.",
       "Questions are single-select by default; set multiple=true only when the user should choose more than one option.",
       "Every question supports entering a custom answer; do not simulate user answers yourself.",
@@ -74,6 +80,7 @@ export function createQuestionTool(
           cancelled: true,
           questions: params.questions.map((question) => ({
             question: question.question,
+            context: question.context,
             header: question.header,
             options: [
               ...question.options.map((option) => option.label),
@@ -117,6 +124,7 @@ export function createQuestionTool(
         cancelled: result.cancelled,
         questions: questions.map((question) => ({
           question: question.question,
+          context: question.context,
           header: question.header,
           options: [...question.options.map((option) => option.label), OTHER_OPTION_DISPLAY_LABEL],
           multiple: question.multiple,
@@ -152,21 +160,30 @@ export function createQuestionTool(
       else rowInvalidators.delete(context.toolCallId)
       if (!context.isPartial && !context.expanded) return title
 
-      const active = context.expanded ? undefined : activeQuestionByCall.get(context.toolCallId)
+      const open = context.isPartial && !context.expanded
+      const active = open ? activeQuestionByCall.get(context.toolCallId) : undefined
       const container = new Container()
       container.addChild(title)
       questions.forEach((question, index) => {
         if (typeof question?.question !== "string") return
         if (active !== undefined && index !== active) return
+        const parts = {
+          question: question.question,
+          context: typeof question.context === "string" ? question.context.trim() : undefined,
+        }
+        const text = getTranscriptText(parts, open)
+        if (!text && count === 1) return
         container.addChild(new Spacer(1))
         if (count > 1) {
           const header = getQuestionHeader({ header: question.header ?? "" }, index)
           const label = `${header} (${index + 1} of ${count})`
           container.addChild(new Text(theme.fg("accent", theme.bold(label)), 0, 0))
         }
-        container.addChild(
-          new Markdown(sanitizeQuestionText(question.question), 0, 0, createMarkdownTheme(theme)),
-        )
+        if (text) {
+          container.addChild(
+            new Markdown(sanitizeQuestionText(text), 0, 0, createMarkdownTheme(theme)),
+          )
+        }
       })
       return container
     },

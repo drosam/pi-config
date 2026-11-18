@@ -1,6 +1,8 @@
 import { describe, test, expect } from "vitest"
 import {
   getQuestionPrompt,
+  getSelectorText,
+  getTranscriptText,
   normalizeAnswerSelection,
   normalizeQuestions,
   replaceAnswerSelection,
@@ -31,6 +33,27 @@ describe("getQuestionPrompt", () => {
 
   test("ignores trailing blank lines", () => {
     expect(getQuestionPrompt("Context\n\nQuestion?\n\n  \n")).toBe("Question?")
+  })
+})
+
+describe("selector and transcript text", () => {
+  const withContext = { question: "Approve?", context: "Draft body" }
+  const legacy = { question: "Context\n\nApprove?" }
+
+  test("with context, selector shows the question and the open transcript only the context", () => {
+    expect(getSelectorText(withContext)).toBe("Approve?")
+    expect(getTranscriptText(withContext, true)).toBe("Draft body")
+    expect(getTranscriptText(withContext, false)).toBe("Draft body\n\nApprove?")
+  })
+
+  test("legacy multi-block prompt keeps the full text in the transcript", () => {
+    expect(getSelectorText(legacy)).toBe("Approve?")
+    expect(getTranscriptText(legacy, true)).toBe(legacy.question)
+  })
+
+  test("single-block prompt without context has no open transcript text", () => {
+    expect(getTranscriptText({ question: "Pick one" }, true)).toBe("")
+    expect(getTranscriptText({ question: "Pick one" }, false)).toBe("Pick one")
   })
 })
 
