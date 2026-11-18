@@ -17,6 +17,7 @@ const RAW: Record<string, string> = {
   [Key.shift("tab")]: "\x1b[Z",
   [Key.ctrl("s")]: "\x13",
   [Key.ctrl("c")]: "\x03",
+  [Key.alt("o")]: "\x1bo",
 }
 
 /** Convert a Key identifier or plain character to its raw terminal byte sequence. */
@@ -309,6 +310,34 @@ describe("review tab", () => {
     component.handleInput(raw(Key.tab))
     component.handleInput(raw(Key.tab))
     expect(seen).toEqual([1, 2])
+  })
+})
+
+describe("hide toggle", () => {
+  const plain = (lines: string[]) => lines.join("\n").replace(/\x1b\[[0-9;]*m/g, "")
+
+  test("alt+o collapses the selector to one hint line and restores it", () => {
+    const { send, render } = setup([makeQuestion()])
+    expect(plain(render())).toContain("alt+o hide")
+    send(Key.alt("o"))
+    const hidden = plain(render())
+    expect(hidden).toContain("Question hidden")
+    expect(hidden).not.toContain("Pick a color")
+    expect(render().filter((line) => line.trim()).length).toBe(1)
+    send(Key.alt("o"))
+    expect(plain(render())).toContain("Pick a color")
+  })
+
+  test("other keys are ignored while hidden and state is kept", () => {
+    const { send, getResult } = setup([makeQuestion()])
+    send(Key.down) // Blue
+    send(Key.alt("o"))
+    send(Key.enter)
+    send(Key.escape)
+    expect(getResult()).toBeUndefined()
+    send(Key.alt("o"))
+    send(Key.enter)
+    expect(getResult()!.answers).toEqual([["Blue"]])
   })
 })
 

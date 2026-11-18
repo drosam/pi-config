@@ -19,6 +19,7 @@ import {
 import { OTHER_OPTION_DISPLAY_LABEL, OTHER_OPTION_LABEL, type NormalizedQuestion } from "./types.ts"
 
 const MAX_PROMPT_LINES = 8
+const HIDE_KEY = Key.alt("o")
 
 export function createMarkdownTheme(theme: Theme): MarkdownTheme {
   return {
@@ -63,6 +64,7 @@ class QuestionPromptComponent {
   private currentOptionIndex = 0
   private editingOther = false
   private reviewing = false
+  private hidden = false
   private readonly selected = new Map<number, Set<string>>()
   private readonly customValues = new Map<number, string>()
   private readonly questionMarkdown = new Map<number, Markdown>()
@@ -301,6 +303,13 @@ class QuestionPromptComponent {
   }
 
   handleInput(data: string) {
+    if (matchesKey(data, HIDE_KEY)) {
+      this.hidden = !this.hidden
+      this.refresh()
+      return
+    }
+    // While hidden, keys other than the toggle are ignored so nothing is answered by accident.
+    if (this.hidden) return
     if (this.reviewing) {
       this.handleReviewInput(data)
       return
@@ -426,6 +435,11 @@ class QuestionPromptComponent {
     const key = (value: string) => this.theme.fg("accent", value)
     const action = (value: string) => this.theme.fg("muted", value)
     const divider = this.theme.fg("dim", "·")
+    if (this.hidden) {
+      add(
+        `${this.theme.fg("accent", "Question hidden")} ${this.theme.fg("muted", "- read the transcript, press")} ${key("alt+o")} ${this.theme.fg("muted", "to show it again")}`,
+      )
+    }
     const finalize = () => {
       this.cachedWidth = width
       this.dirty = false
@@ -453,6 +467,8 @@ class QuestionPromptComponent {
         lines.push(i === 0 ? line : hangIndent + line)
       }
     }
+
+    if (this.hidden) return finalize()
 
     add(progress)
     add()
@@ -485,6 +501,9 @@ class QuestionPromptComponent {
           divider,
           key("shift+tab"),
           action("back"),
+          divider,
+          key("alt+o"),
+          action("hide"),
           divider,
           key("esc"),
           action("dismiss"),
@@ -546,6 +565,9 @@ class QuestionPromptComponent {
         divider,
         key("ctrl+s"),
         action(isLastQuestion ? (this.hasReview() ? "review" : "submit") : "next"),
+        divider,
+        key("alt+o"),
+        action("hide"),
         divider,
         key("esc"),
         action("dismiss"),

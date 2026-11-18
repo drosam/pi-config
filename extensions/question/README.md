@@ -32,7 +32,8 @@ Behavior:
 - returns answers as arrays of selected labels in question order
 - in **single-select** mode, `Enter` selects the current option and advances
 - in **multi-select** mode, `Enter` toggles the current option and stays on the same question
-- footer key hints are shown as: `⇆ tab • ↑↓ select • enter confirm/toggle • ctrl+s submit • esc dismiss`
+- `alt+o` collapses the selector to one hint line so more transcript is visible; other keys are ignored until `alt+o` restores it with answers kept
+- footer key hints are shown as: `⇆ tab • ↑↓ select • enter confirm/toggle • ctrl+s submit/review • alt+o hide • esc dismiss`
 - requires interactive UI mode
 
 ## Source of truth
