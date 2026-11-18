@@ -54,6 +54,49 @@ describe("question renderCall", () => {
     expect(render({ isPartial: false, expanded: true })).toContain("context-marker")
   })
 
+  test("shows only the active question while the prompt is open", async () => {
+    const multi = {
+      questions: [
+        { question: "First-marker body", header: "One", options: [{ label: "A" }] },
+        { question: "Second-marker body", header: "Two", options: [{ label: "B" }] },
+      ],
+    }
+    const tool = createQuestionTool({ events: { emit: vi.fn() } } as unknown as ExtensionAPI)
+    const invalidate = vi.fn()
+    const context = (expanded: boolean) =>
+      ({ toolCallId: "call-1", isPartial: true, expanded, invalidate }) as unknown as Parameters<
+        NonNullable<typeof tool.renderCall>
+      >[2]
+    const row = (expanded = false) =>
+      tool.renderCall!(multi, theme, context(expanded)).render(80).join("\n")
+
+    expect(row()).toContain("Second-marker")
+
+    let component!: { handleInput(data: string): void }
+    let finish!: (value: { cancelled: boolean; answers: string[][] }) => void
+    const custom = vi.fn((factory: Function) => {
+      component = factory({ requestRender() {} }, theme, undefined, () => {})
+      return new Promise((resolve) => { finish = resolve })
+    })
+    const ctx = { hasUI: true, ui: { custom } } as unknown as Parameters<typeof tool.execute>[4]
+    const pending = tool.execute("call-1", multi, undefined, undefined, ctx)
+
+    expect(invalidate).toHaveBeenCalled()
+    expect(row()).toContain("First-marker")
+    expect(row()).toContain("One (1 of 2)")
+    expect(row()).not.toContain("Second-marker")
+
+    component.handleInput("\t")
+    expect(row()).toContain("Second-marker")
+    expect(row()).not.toContain("First-marker")
+    expect(row(true)).toContain("First-marker")
+
+    finish({ cancelled: false, answers: [["A"], ["B"]] })
+    await pending
+    expect(row()).toContain("First-marker")
+    expect(row()).toContain("Second-marker")
+  })
+
   test("tolerates partially streamed questions", () => {
     const tool = createQuestionTool({} as ExtensionAPI)
     const context = { isPartial: true, expanded: false } as unknown as Parameters<

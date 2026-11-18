@@ -39,6 +39,10 @@ const QuestionParams = Type.Object({
   }),
 })
 
+// Links an open prompt to its transcript row so the row shows only the active question.
+const activeQuestionByCall = new Map<string, number>()
+const rowInvalidators = new Map<string, () => void>()
+
 export function createQuestionTool(
   pi: ExtensionAPI,
 ): ToolDefinition<typeof QuestionParams, QuestionResultDetails> {
@@ -64,7 +68,7 @@ export function createQuestionTool(
       successBg: null,
       errorBg: null,
     },
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+    async execute(toolCallId, params, _signal, _onUpdate, ctx) {
       if (!ctx.hasUI) {
         const details: QuestionResultDetails = {
           cancelled: true,
@@ -87,13 +91,25 @@ export function createQuestionTool(
 
       const questions = normalizeQuestions(params.questions as QuestionInput[])
       let result: { cancelled: boolean; answers: string[][] }
+      const showQuestion = (index: number) => {
+        activeQuestionByCall.set(toolCallId, index)
+        rowInvalidators.get(toolCallId)?.()
+      }
       pi.events.emit("herdr:blocked", { active: true, label: "Waiting for answer" })
       try {
+        showQuestion(0)
         result = await ctx.ui.custom<{ cancelled: boolean; answers: string[][] }>(
           (tui, theme, _kb, done) =>
-            createQuestionPromptComponent({ tui, theme, questions, onDone: done }),
+            createQuestionPromptComponent({
+              tui,
+              theme,
+              questions,
+              onDone: done,
+              onQuestionChange: showQuestion,
+            }),
         )
       } finally {
+        activeQuestionByCall.delete(toolCallId)
         pi.events.emit("herdr:blocked", { active: false })
       }
 
@@ -132,16 +148,21 @@ export function createQuestionTool(
         0,
         0,
       )
+      if (context.isPartial) rowInvalidators.set(context.toolCallId, context.invalidate)
+      else rowInvalidators.delete(context.toolCallId)
       if (!context.isPartial && !context.expanded) return title
 
+      const active = context.expanded ? undefined : activeQuestionByCall.get(context.toolCallId)
       const container = new Container()
       container.addChild(title)
       questions.forEach((question, index) => {
         if (typeof question?.question !== "string") return
+        if (active !== undefined && index !== active) return
         container.addChild(new Spacer(1))
         if (count > 1) {
           const header = getQuestionHeader({ header: question.header ?? "" }, index)
-          container.addChild(new Text(theme.fg("accent", theme.bold(header)), 0, 0))
+          const label = `${header} (${index + 1} of ${count})`
+          container.addChild(new Text(theme.fg("accent", theme.bold(label)), 0, 0))
         }
         container.addChild(
           new Markdown(sanitizeQuestionText(question.question), 0, 0, createMarkdownTheme(theme)),

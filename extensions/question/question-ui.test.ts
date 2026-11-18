@@ -251,6 +251,24 @@ describe("multi-question navigation", () => {
   })
 })
 
+describe("question change callback", () => {
+  test("reports the active question on navigation", () => {
+    const seen: number[] = []
+    const q2 = makeQuestion({ question: "Size", header: "Size", options: [{ label: "S" }] })
+    const component = createQuestionPromptComponent({
+      tui,
+      theme,
+      questions: [makeQuestion(), q2],
+      onDone() {},
+      onQuestionChange: (index) => seen.push(index),
+    })
+    component.handleInput(raw(Key.tab))
+    component.handleInput(raw(Key.shift("tab")))
+    component.handleInput(raw(Key.shift("tab")))
+    expect(seen).toEqual([1, 0])
+  })
+})
+
 // --- "Type your own answer" ---
 
 describe("type your own answer", () => {

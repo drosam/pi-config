@@ -44,6 +44,7 @@ interface QuestionPromptComponentInput {
   theme: Theme
   questions: NormalizedQuestion[]
   onDone(result: { cancelled: boolean; answers: string[][] }): void
+  onQuestionChange?(index: number): void
 }
 
 export function createQuestionPromptComponent(input: QuestionPromptComponentInput) {
@@ -55,6 +56,7 @@ class QuestionPromptComponent {
   private readonly theme: Theme
   private readonly questions: NormalizedQuestion[]
   private readonly onDone: QuestionPromptComponentInput["onDone"]
+  private readonly onQuestionChange: QuestionPromptComponentInput["onQuestionChange"]
   private readonly editor: Editor
   private suppressEditorChange = false
   private currentQuestionIndex = 0
@@ -67,11 +69,12 @@ class QuestionPromptComponent {
   private cachedLines?: string[]
   private dirty = true
 
-  constructor({ tui, theme, questions, onDone }: QuestionPromptComponentInput) {
+  constructor({ tui, theme, questions, onDone, onQuestionChange }: QuestionPromptComponentInput) {
     this.tui = tui
     this.theme = theme
     this.questions = questions
     this.onDone = onDone
+    this.onQuestionChange = onQuestionChange
     this.editor = new Editor(tui, this.getEditorTheme())
     this.editor.disableSubmit = true
     questions.forEach((question, index) => {
@@ -242,6 +245,7 @@ class QuestionPromptComponent {
     this.currentOptionIndex = 0
     this.editingOther = false
     this.syncEditorForCurrentQuestion()
+    this.onQuestionChange?.(next)
   }
 
   private refresh() {
