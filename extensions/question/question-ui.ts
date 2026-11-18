@@ -11,11 +11,14 @@ import {
   wrapTextWithAnsi,
 } from "@mariozechner/pi-tui"
 import {
+  getQuestionPrompt,
   normalizeAnswerSelection,
   replaceAnswerSelection,
   sanitizeQuestionText,
 } from "./helpers.ts"
 import { OTHER_OPTION_DISPLAY_LABEL, OTHER_OPTION_LABEL, type NormalizedQuestion } from "./types.ts"
+
+const MAX_PROMPT_LINES = 8
 
 export function createMarkdownTheme(theme: Theme): MarkdownTheme {
   return {
@@ -74,7 +77,12 @@ class QuestionPromptComponent {
     questions.forEach((question, index) => {
       this.questionMarkdown.set(
         index,
-        new Markdown(sanitizeQuestionText(question.question), 0, 0, createMarkdownTheme(theme)),
+        new Markdown(
+          sanitizeQuestionText(getQuestionPrompt(question.question)),
+          0,
+          0,
+          createMarkdownTheme(theme),
+        ),
       )
     })
     this.editor.onChange = () => {
@@ -114,8 +122,15 @@ class QuestionPromptComponent {
     return this.getCurrentQuestion().options.length + 1
   }
 
+  // The full prompt is rendered in the transcript; the selector shows its final block.
   private getQuestionLines(width: number): string[] {
-    return this.questionMarkdown.get(this.currentQuestionIndex)?.render(width) ?? []
+    const lines = this.questionMarkdown.get(this.currentQuestionIndex)?.render(width) ?? []
+    const question = this.getCurrentQuestion().question
+    const clipped = lines.length > MAX_PROMPT_LINES
+    const visible = clipped ? [this.theme.fg("dim", "..."), ...lines.slice(-MAX_PROMPT_LINES)] : lines
+    if (!clipped && getQuestionPrompt(question) === question) return visible
+    const hint = this.theme.fg("dim", "Full question is shown in the transcript.")
+    return [...visible, ...wrapTextWithAnsi(hint, width)]
   }
 
   private isOtherSelected(index: number): boolean {

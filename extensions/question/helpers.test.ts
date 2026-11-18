@@ -1,5 +1,6 @@
 import { describe, test, expect } from "vitest"
 import {
+  getQuestionPrompt,
   normalizeAnswerSelection,
   normalizeQuestions,
   replaceAnswerSelection,
@@ -11,6 +12,25 @@ import { OTHER_OPTION_LABEL } from "./types.ts"
 describe("sanitizeQuestionText", () => {
   test("removes terminal and bidi controls while preserving line breaks", () => {
     expect(sanitizeQuestionText("before\u001b[2J\r\nafter\u202e")).toBe("before[2J\nafter")
+  })
+})
+
+describe("getQuestionPrompt", () => {
+  test("returns the final paragraph of a multi-block prompt", () => {
+    expect(getQuestionPrompt("### Item 1\n\nContext here.\n\n**What now?**")).toBe("**What now?**")
+  })
+
+  test("returns a single-block prompt unchanged", () => {
+    expect(getQuestionPrompt("Pick one\nof these")).toBe("Pick one\nof these")
+  })
+
+  test("keeps a final fenced block with blank lines intact", () => {
+    const fence = "```\nline 1\n\nline 2\n```"
+    expect(getQuestionPrompt(`Intro\n\n${fence}`)).toBe(fence)
+  })
+
+  test("ignores trailing blank lines", () => {
+    expect(getQuestionPrompt("Context\n\nQuestion?\n\n  \n")).toBe("Question?")
   })
 })
 

@@ -333,7 +333,7 @@ describe("render output", () => {
     expect(output).toContain(OTHER_OPTION_DISPLAY_LABEL)
   })
 
-  test("renders the complete long Markdown question above the options", () => {
+  test("shows only the final block of a long Markdown question above the options", () => {
     const evidence = Array.from({ length: 24 }, (_, index) => `- Evidence ${index + 1}`).join("\n")
     const question = makeQuestion({
       question: `### Item C6\n\n${evidence}\n\n**Choose unmistakable-final-word**`,
@@ -342,9 +342,10 @@ describe("render output", () => {
     const { render, send, getResult } = setup([question])
 
     const output = render(30).join("\n")
-    expect(output).toContain("Item C6")
-    expect(output).toContain("Evidence 24")
+    expect(output).not.toContain("Item C6")
+    expect(output).not.toContain("Evidence 24")
     expect(output).toContain("unmistakable-final-word")
+    expect(output).toContain("Full question")
     expect(output).toContain("A")
 
     send(Key.down)
@@ -352,6 +353,19 @@ describe("render output", () => {
     for (const ch of "draft") send(ch)
     send(Key.enter)
     expect(getResult()!.answers).toEqual([["draft"]])
+  })
+
+  test("single-block question has no transcript hint", () => {
+    const output = setup([makeQuestion()]).render().join("\n")
+    expect(output).not.toContain("shown in the transcript")
+  })
+
+  test("clips a very long final block to its last lines", () => {
+    const block = Array.from({ length: 20 }, (_, index) => `- line-${index + 1}`).join("\n")
+    const output = setup([makeQuestion({ question: `Intro\n\n${block}` })]).render().join("\n")
+    expect(output).toContain("line-20")
+    expect(output).not.toMatch(/line-1(?!\d)/)
+    expect(output).toContain("...")
   })
 
   test("includes option description", () => {

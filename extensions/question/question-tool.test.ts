@@ -16,6 +16,54 @@ function setup(custom: ReturnType<typeof vi.fn>, hasUI = true) {
   return { emit, execute: () => tool.execute("question-1", params, undefined, undefined, ctx) }
 }
 
+describe("question renderCall", () => {
+  const plain = (text: string) => text
+  const theme = {
+    fg: (_color: string, text: string) => text,
+    bold: plain,
+    italic: plain,
+    strikethrough: plain,
+    underline: plain,
+  } as unknown as Parameters<NonNullable<ReturnType<typeof createQuestionTool>["renderCall"]>>[1]
+  const args = {
+    questions: [
+      { question: "### Item 7\n\nFull context-marker.\n\n**What now?**", header: "B7", options: [] },
+    ],
+  }
+
+  function render(state: { isPartial: boolean; expanded: boolean }) {
+    const tool = createQuestionTool({} as ExtensionAPI)
+    const context = state as unknown as Parameters<NonNullable<typeof tool.renderCall>>[2]
+    return tool.renderCall!(args, theme, context).render(80).join("\n")
+  }
+
+  test("shows the full prompt while unanswered", () => {
+    const output = render({ isPartial: true, expanded: false })
+    expect(output).toContain("Item 7")
+    expect(output).toContain("context-marker")
+    expect(output).toContain("What now?")
+  })
+
+  test("collapses to the title once answered", () => {
+    const output = render({ isPartial: false, expanded: false })
+    expect(output).toContain("1 question")
+    expect(output).not.toContain("context-marker")
+  })
+
+  test("shows the full prompt when an answered row is expanded", () => {
+    expect(render({ isPartial: false, expanded: true })).toContain("context-marker")
+  })
+
+  test("tolerates partially streamed questions", () => {
+    const tool = createQuestionTool({} as ExtensionAPI)
+    const context = { isPartial: true, expanded: false } as unknown as Parameters<
+      NonNullable<typeof tool.renderCall>
+    >[2]
+    const partial = { questions: [{ header: "B7" }] } as unknown as typeof args
+    expect(tool.renderCall!(partial, theme, context).render(80).join("\n")).toContain("1 question")
+  })
+})
+
 describe("question Herdr state", () => {
   test.each([false, true])("reports blocked until prompt resolves (cancelled=%s)", async (cancelled) => {
     const result = { cancelled, answers: cancelled ? [] : [["Yes"]] }

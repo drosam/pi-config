@@ -21,7 +21,8 @@ const OptionSchema = Type.Object({
 
 const QuestionSchema = Type.Object({
   question: Type.String({
-    description: "Complete Markdown prompt, including any background needed to decide",
+    description:
+      "Complete Markdown prompt of any length, including all background needed to decide; end with the focused question",
   }),
   header: Type.String({ description: "Short label for progress tabs" }),
   options: Type.Array(OptionSchema, { description: "Available predefined options" }),
@@ -45,12 +46,12 @@ export function createQuestionTool(
     name: "question",
     label: "Question",
     description:
-      "Ask the user one or more questions. Complete Markdown prompts render above their options, and completed results retain expandable question context. Questions are single-select by default, support a type-your-own-answer option, and can allow multiple selections when multiple=true. Use this to clarify requirements or gather choices during execution.",
+      "Ask the user one or more questions. The complete Markdown prompt is shown in the transcript and its final paragraph is shown with the options; completed questions collapse to their answers and expand to the full prompt. Questions are single-select by default, support a type-your-own-answer option, and can allow multiple selections when multiple=true. Use this to clarify requirements or gather choices during execution.",
     promptSnippet:
       "Ask one or more user questions with complete Markdown prompts, single-select by default, optional multiple selection, and a type-your-own-answer option.",
     promptGuidelines: [
       "Use this tool when you need clarification, preferences, or implementation choices from the user.",
-      "When a decision depends on analysis or evidence, include all background needed to decide in the question field and end with one focused question; do not rely on private reasoning or separate narration.",
+      "When a decision depends on analysis, evidence, drafts or previews, put all of that content in the question field, at any length, and end with one focused question. Do not put it in separate narration or private reasoning, and do not refer to content 'above' instead of including it; reasoning is not visible to the user.",
       "Keep option labels and descriptions concise when the question contains detailed context.",
       "Questions are single-select by default; set multiple=true only when the user should choose more than one option.",
       "Every question supports entering a custom answer; do not simulate user answers yourself.",
@@ -120,16 +121,35 @@ export function createQuestionTool(
         details,
       }
     },
-    renderCall(args, theme) {
-      const count = Array.isArray(args.questions) ? args.questions.length : 0
-      return new Text(
+    renderCall(args, theme, context) {
+      const questions: Array<Partial<QuestionInput> | undefined> = Array.isArray(args.questions)
+        ? args.questions
+        : []
+      const count = questions.length
+      const title = new Text(
         theme.fg("toolTitle", theme.bold("question ")) +
           theme.fg("muted", `${count} question${count === 1 ? "" : "s"}`),
         0,
         0,
       )
+      if (!context.isPartial && !context.expanded) return title
+
+      const container = new Container()
+      container.addChild(title)
+      questions.forEach((question, index) => {
+        if (typeof question?.question !== "string") return
+        container.addChild(new Spacer(1))
+        if (count > 1) {
+          const header = getQuestionHeader({ header: question.header ?? "" }, index)
+          container.addChild(new Text(theme.fg("accent", theme.bold(header)), 0, 0))
+        }
+        container.addChild(
+          new Markdown(sanitizeQuestionText(question.question), 0, 0, createMarkdownTheme(theme)),
+        )
+      })
+      return container
     },
-    renderResult(result, options, theme, context) {
+    renderResult(result, _options, theme, context) {
       if (context.isError) {
         const msg = result.content.find((c: any) => c.type === "text")?.text || "Failed"
         return new Text(theme.fg("error", msg), 0, 0)
@@ -142,39 +162,14 @@ export function createQuestionTool(
       if (details.cancelled) {
         return new Text(theme.fg("warning", "Cancelled"), 0, 0)
       }
-      if (!options.expanded) {
-        const lines = details.questions.map((question, index) => {
-          const answers = details.answers[index] ?? []
-          const value = answers.length > 0 ? answers.join(", ") : "Unanswered"
-          const header = `${index + 1}. ${getQuestionHeader(question, index)}`
-          return `${theme.fg("accent", header)}: ${theme.fg("muted", sanitizeQuestionText(value))}`
-        })
-        return new Text(lines.join("\n"), 0, 0)
-      }
-
-      const container = new Container()
-      details.questions.forEach((question, index) => {
+      // The full prompt is rendered by renderCall when expanded.
+      const lines = details.questions.map((question, index) => {
         const answers = details.answers[index] ?? []
         const value = answers.length > 0 ? answers.join(", ") : "Unanswered"
-        container.addChild(
-          new Markdown(
-            sanitizeQuestionText(question.question),
-            0,
-            0,
-            createMarkdownTheme(theme),
-          ),
-        )
-        container.addChild(new Spacer(1))
-        container.addChild(
-          new Text(
-            `${theme.fg("success", theme.bold("Answer:"))} ${sanitizeQuestionText(value)}`,
-            0,
-            0,
-          ),
-        )
-        if (index < details.questions.length - 1) container.addChild(new Spacer(1))
+        const header = `${index + 1}. ${getQuestionHeader(question, index)}`
+        return `${theme.fg("accent", header)}: ${theme.fg("muted", sanitizeQuestionText(value))}`
       })
-      return container
+      return new Text(lines.join("\n"), 0, 0)
     },
   }
 }

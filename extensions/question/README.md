@@ -18,8 +18,8 @@ Parameters:
 
 Behavior:
 
-- complete Markdown questions render above their options
-- completed questions show a compact answer summary and expand to full question context with Pi's `Ctrl+O` tool toggle
+- the complete Markdown question renders in the transcript (scrollable, any length); the selector shows only its final paragraph (last 8 lines at most) above the options
+- completed questions collapse to a compact answer summary and expand to the full question with Pi's `Ctrl+O` tool toggle
 - terminal and bidirectional control characters in question text are removed before rendering
 - questions are **single-select by default**
 - set `multiple: true` to allow **multi-select**

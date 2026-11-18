@@ -14,6 +14,21 @@ function normalizeQuestionText(value: string): string {
   return lines.length === 1 ? (lines[0]?.trim() ?? "") : lines.join("\n")
 }
 
+const FENCE_PATTERN = /^\s*(```|~~~)/
+
+/** Returns the final Markdown block of a prompt, keeping fenced code blocks intact. */
+export function getQuestionPrompt(value: string): string {
+  const lines = value.replace(/\r\n?/g, "\n").split("\n")
+  while (lines.at(-1)?.trim() === "") lines.pop()
+  let inFence = false
+  let start = 0
+  lines.forEach((line, index) => {
+    if (FENCE_PATTERN.test(line)) inFence = !inFence
+    else if (!inFence && line.trim() === "") start = index + 1
+  })
+  return lines.slice(start).join("\n")
+}
+
 export function getQuestionHeader(question: { header: string }, index: number): string {
   return question.header.trim() || `Question ${index + 1}`
 }
