@@ -62,6 +62,7 @@ class QuestionPromptComponent {
   private currentQuestionIndex = 0
   private currentOptionIndex = 0
   private editingOther = false
+  private reviewing = false
   private readonly selected = new Map<number, Set<string>>()
   private readonly customValues = new Map<number, string>()
   private readonly questionMarkdown = new Map<number, Markdown>()
@@ -233,16 +234,58 @@ class QuestionPromptComponent {
     this.onDone({ cancelled, answers: this.collectAnswers() })
   }
 
+  // A final Submit tab reviews every answer when there are several questions.
+  private hasReview(): boolean {
+    return this.questions.length > 1
+  }
+
+  private openReview() {
+    this.syncCurrentAnswers()
+    this.editingOther = false
+    this.reviewing = true
+    this.onQuestionChange?.(this.questions.length)
+  }
+
   private advanceOrSubmit() {
     if (this.currentQuestionIndex >= this.questions.length - 1) {
-      this.finish(false)
+      if (this.hasReview()) this.openReview()
+      else this.finish(false)
       return
     }
     this.moveQuestion(1)
   }
 
+  private jumpToQuestion(index: number) {
+    this.reviewing = false
+    this.currentQuestionIndex = index
+    this.currentOptionIndex = 0
+    this.syncEditorForCurrentQuestion()
+    this.onQuestionChange?.(index)
+  }
+
+  private handleReviewInput(data: string) {
+    if (matchesKey(data, Key.escape) || matchesKey(data, Key.ctrl("c"))) {
+      this.finish(true)
+      return
+    }
+    if (matchesKey(data, Key.enter) || matchesKey(data, Key.ctrl("s"))) {
+      this.finish(false)
+      return
+    }
+    if (matchesKey(data, Key.shift("tab")) || matchesKey(data, Key.left)) {
+      this.jumpToQuestion(this.questions.length - 1)
+    } else if (/^[1-9]$/.test(data) && Number(data) <= this.questions.length) {
+      this.jumpToQuestion(Number(data) - 1)
+    }
+    this.refresh()
+  }
+
   private moveQuestion(direction: -1 | 1) {
     const next = this.currentQuestionIndex + direction
+    if (next === this.questions.length && this.hasReview()) {
+      this.openReview()
+      return
+    }
     if (next < 0 || next >= this.questions.length) return
     this.syncCurrentAnswers()
     this.currentQuestionIndex = next
@@ -258,6 +301,10 @@ class QuestionPromptComponent {
   }
 
   handleInput(data: string) {
+    if (this.reviewing) {
+      this.handleReviewInput(data)
+      return
+    }
     if (this.editingOther) {
       if (matchesKey(data, Key.escape)) {
         this.editingOther = false
@@ -358,7 +405,7 @@ class QuestionPromptComponent {
     const answers = this.collectAnswers()
     const progress = this.questions
       .map((item, index) => {
-        const isActive = index === this.currentQuestionIndex
+        const isActive = !this.reviewing && index === this.currentQuestionIndex
         const answered = (answers[index]?.length ?? 0) > 0
         const bullet = answered ? "■" : "□"
         const label = ` ${bullet} ${item.header} `
@@ -366,7 +413,28 @@ class QuestionPromptComponent {
           ? this.theme.bg("selectedBg", this.theme.fg("text", label))
           : this.theme.fg(answered ? "success" : "muted", label)
       })
+      .concat(
+        this.hasReview()
+          ? [
+              this.reviewing
+                ? this.theme.bg("selectedBg", this.theme.fg("text", " ✓ Submit "))
+                : this.theme.fg("muted", " ✓ Submit "),
+            ]
+          : [],
+      )
       .join(" ")
+    const key = (value: string) => this.theme.fg("accent", value)
+    const action = (value: string) => this.theme.fg("muted", value)
+    const divider = this.theme.fg("dim", "·")
+    const finalize = () => {
+      this.cachedWidth = width
+      this.dirty = false
+      const margin = " ".repeat(px)
+      this.cachedLines = ["", ...lines, ""].map((line) =>
+        truncateToWidth(margin + line, width, ""),
+      )
+      return this.cachedLines
+    }
 
     // Wrap text, prefixing continuation lines with `prefix`.
     const wrap = (text: string, prefix = "") => {
@@ -388,6 +456,43 @@ class QuestionPromptComponent {
 
     add(progress)
     add()
+
+    if (this.reviewing) {
+      add(this.theme.bold("Review your answers"))
+      add()
+      let unanswered = 0
+      this.questions.forEach((item, index) => {
+        const values = answers[index] ?? []
+        if (values.length === 0) unanswered++
+        const value =
+          values.length > 0
+            ? sanitizeQuestionText(values.join(", "))
+            : this.theme.fg("warning", "Unanswered")
+        wrap(`${key(`${index + 1}.`)} ${item.header}: ${value}`)
+      })
+      if (unanswered > 0) {
+        add()
+        add(this.theme.fg("warning", `${unanswered} unanswered; enter submits anyway.`))
+      }
+      add()
+      add(
+        [
+          key("enter"),
+          action("submit"),
+          divider,
+          key(`1-${this.questions.length}`),
+          action("edit answer"),
+          divider,
+          key("shift+tab"),
+          action("back"),
+          divider,
+          key("esc"),
+          action("dismiss"),
+        ].join(" "),
+      )
+      add()
+      return finalize()
+    }
 
     this.getQuestionLines(contentWidth).forEach(add)
     add()
@@ -428,9 +533,6 @@ class QuestionPromptComponent {
     }
 
     add()
-    const key = (value: string) => this.theme.fg("accent", value)
-    const action = (value: string) => this.theme.fg("muted", value)
-    const divider = this.theme.fg("dim", "·")
     add(
       [
         key("⇆"),
@@ -443,7 +545,7 @@ class QuestionPromptComponent {
         action(multiple ? "toggle" : "confirm"),
         divider,
         key("ctrl+s"),
-        action(isLastQuestion ? "submit" : "next"),
+        action(isLastQuestion ? (this.hasReview() ? "review" : "submit") : "next"),
         divider,
         key("esc"),
         action("dismiss"),
@@ -458,14 +560,7 @@ class QuestionPromptComponent {
       )
     }
     add()
-
-    this.cachedWidth = width
-    this.dirty = false
-    const margin = " ".repeat(px)
-    this.cachedLines = ["", ...lines, ""].map((line) =>
-      truncateToWidth(margin + line, width, ""),
-    )
-    return this.cachedLines
+    return finalize()
   }
 
   private renderOptionLine(

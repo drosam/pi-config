@@ -216,7 +216,9 @@ describe("multi-question navigation", () => {
     })
     const { send, getResult } = setup([q1, q2])
     send(Key.enter) // select Red on Q1 -> auto-advance to Q2
-    send(Key.enter) // select S on Q2 -> submit
+    send(Key.enter) // select S on Q2 -> review
+    expect(getResult()).toBeUndefined()
+    send(Key.enter) // submit from review
     const r = getResult()!
     expect(r.cancelled).toBe(false)
     expect(r.answers).toEqual([["Red"], ["S"]])
@@ -227,7 +229,8 @@ describe("multi-question navigation", () => {
     const q2 = makeQuestion({ question: "Size", header: "Size", options: [{ label: "S" }] })
     const { send, getResult } = setup([q1, q2])
     send(Key.enter) // select Red -> advance to Q2
-    send(Key.enter) // select S -> finish
+    send(Key.enter) // select S -> review
+    send(Key.ctrl("s")) // submit from review
     const r = getResult()!
     expect(r.answers).toEqual([["Red"], ["S"]])
   })
@@ -245,9 +248,67 @@ describe("multi-question navigation", () => {
     send(Key.down) // move to Blue
     send(Key.enter) // select Blue (replaces Red) -> advance to Q2
     send(Key.down) // move to M
-    send(Key.enter) // select M -> submit
+    send(Key.enter) // select M -> review
+    send(Key.enter) // submit
     const r = getResult()!
     expect(r.answers).toEqual([["Blue"], ["M"]])
+  })
+})
+
+describe("review tab", () => {
+  const plain = (lines: string[]) => lines.join("\n").replace(/\x1b\[[0-9;]*m/g, "")
+  const twoQuestions = () => [
+    makeQuestion(),
+    makeQuestion({ question: "Size", header: "Size", options: [{ label: "S" }, { label: "M" }] }),
+  ]
+
+  test("lists answers and flags unanswered questions", () => {
+    const { send, render, getResult } = setup(twoQuestions())
+    send(Key.enter) // Red -> Q2
+    send(Key.tab) // skip Q2 -> review
+    const output = plain(render())
+    expect(getResult()).toBeUndefined()
+    expect(output).toContain("Review your answers")
+    expect(output).toContain("1. Color: Red")
+    expect(output).toContain("2. Size: Unanswered")
+    expect(output).toContain("1 unanswered")
+  })
+
+  test("number key jumps back to edit an answer", () => {
+    const { send, getResult } = setup(twoQuestions())
+    send(Key.enter) // Red -> Q2
+    send(Key.enter) // S -> review
+    send("1") // back to Color
+    send(Key.down)
+    send(Key.enter) // Blue -> Q2
+    send(Key.tab) // review
+    send(Key.enter) // submit
+    expect(getResult()!.answers).toEqual([["Blue"], ["S"]])
+  })
+
+  test("shift+tab returns to the last question and esc cancels", () => {
+    const { send, render, getResult } = setup(twoQuestions())
+    send(Key.tab) // Q2
+    send(Key.tab) // review
+    send(Key.shift("tab")) // back to Q2
+    expect(plain(render())).not.toContain("Review your answers")
+    send(Key.tab)
+    send(Key.escape)
+    expect(getResult()!.cancelled).toBe(true)
+  })
+
+  test("reports the review tab as index past the last question", () => {
+    const seen: number[] = []
+    const component = createQuestionPromptComponent({
+      tui,
+      theme,
+      questions: twoQuestions(),
+      onDone() {},
+      onQuestionChange: (index) => seen.push(index),
+    })
+    component.handleInput(raw(Key.tab))
+    component.handleInput(raw(Key.tab))
+    expect(seen).toEqual([1, 2])
   })
 })
 
@@ -454,7 +515,8 @@ describe("ctrl+s submit", () => {
     send(Key.enter) // toggle Red
     send(Key.ctrl("s")) // advance to Q2
     expect(getResult()).toBeUndefined()
-    send(Key.enter) // select S -> submit
+    send(Key.enter) // select S -> review
+    send(Key.enter) // submit
     expect(getResult()!.answers).toEqual([["Red"], ["S"]])
   })
 
@@ -467,18 +529,25 @@ describe("ctrl+s submit", () => {
     for (const ch of "x") send(ch)
     send(Key.ctrl("s")) // advance to Q2
     expect(getResult()).toBeUndefined()
-    send(Key.ctrl("s")) // submit on last
+    send(Key.ctrl("s")) // review on last
+    send(Key.ctrl("s")) // submit from review
     expect(getResult()!.answers).toEqual([["x"], []])
   })
 
-  test("footer shows next before last question, submit on last", () => {
+  test("footer shows next before last question, review on last", () => {
     const q1 = makeQuestion()
     const q2 = makeQuestion({ question: "Size", header: "Size", options: [{ label: "S" }] })
     const { send, render } = setup([q1, q2])
     const plain = () => render().join("\n").replace(/\x1b\[[0-9;]*m/g, "")
     expect(plain()).toContain("ctrl+s next")
     send(Key.tab)
-    expect(plain()).toContain("ctrl+s submit")
+    expect(plain()).toContain("ctrl+s review")
+  })
+
+  test("single question footer still says submit", () => {
+    const plain = setup([makeQuestion()]).render().join("\n").replace(/\x1b\[[0-9;]*m/g, "")
+    expect(plain).toContain("ctrl+s submit")
+    expect(plain).not.toContain("Submit ")
   })
 })
 

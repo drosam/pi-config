@@ -22,6 +22,7 @@ Behavior:
 - `context` renders in the transcript (scrollable, any length) and `question` renders above the options, so nothing is shown twice while the prompt is open
 - without `context`, a multi-paragraph `question` renders fully in the transcript and only its final paragraph (last 8 lines at most) above the options
 - with several questions, the transcript shows only the question on the active tab while the prompt is open
+- with several questions, a final **Submit** tab lists every answer and flags unanswered ones; `enter` submits, `1`-`N` jumps back to edit an answer, `shift+tab` goes back, `esc` dismisses. A single question submits directly
 - completed questions collapse to a compact answer summary and expand to context plus question with Pi's `Ctrl+O` tool toggle
 - terminal and bidirectional control characters in question text are removed before rendering
 - questions are **single-select by default**
