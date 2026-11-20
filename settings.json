@@ -7,17 +7,17 @@
     "anthropic/claude-sonnet-5-5",
     "anthropic/claude-opus-5-5",
     "anthropic/claude-fable-5-2",
-    "openai-codex/gpt-6.1-sol",
+    "openai-codex/gpt-6.2-sol",
     "openai-codex/gpt-6.1-terra",
     "openai-codex/gpt-6-luna",
-    "openai-codex/gpt-6-astra"
+    "openai-codex/gpt-6.2-astra"
   ],
   "packages": [
     "https://github.com/MasuRii/pi-permission-system",
     "npm:pi-lsp-extension",
     "npm:@observal/pi-insights"
   ],
-  "lastChangelogVersion": "1.5.2",
+  "lastChangelogVersion": "1.6.0",
   "deviceId": "e921234f-8a2f-472e-b716-5f0fc58838c7",
   "extensionChangelogVersions": {
     "{\"source\":\"https://github.com/MasuRii/pi-permission-system\",\"scope\":\"user\"}": "0.8.0",
