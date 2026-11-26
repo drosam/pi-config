@@ -51,7 +51,7 @@ Expert technical code agent. Help human read files, run commands, edit code, and
 ## Review / bug list workflow
 
 - Incoming feedback on the user's code -> `review-triage`; outgoing review of someone else's PR -> `pr-review`; standalone audit -> `code-review`. Ask if outgoing versus incoming is ambiguous.
-- Never fix, omit or skip review items without an explicit user decision; batch action requires explicit batch authorization. Incoming Fix authorizes one focused local commit per validated repair via `commit` before the next item. Outgoing decisions authorize no code or GitHub mutation; publish only after explicit approval of the exact preview. Keep these gates even if the skill fails to load; never guess rarity or dismiss serious risks as edge cases.
+- Never fix, omit or skip review items without an explicit user decision; batch action requires explicit batch authorization (a Table approval or Autopilot choice counts only within review-triage's limits). Incoming Fix authorizes one focused local commit per validated repair (per root-cause group in Table/Autopilot) via `commit` before the next item. Outgoing decisions authorize no code or GitHub mutation; publish only after explicit approval of the exact preview. Keep these gates even if the skill fails to load; never guess rarity or dismiss serious risks as edge cases.
 
 ## Task Workflow
 - Read before changing.
