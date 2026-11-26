@@ -8,6 +8,9 @@ importers:
 
   .:
     devDependencies:
+      '@mariozechner/pi-agent-core':
+        specifier: npm:@earendil-works/pi-agent-core@1.5.2
+        version: '@earendil-works/pi-agent-core@1.5.2(@aws-sdk/credential-provider-node@3.972.96)(@smithy/signature-v4@5.7.5)(undici@8.12.3)(ws@8.22.2)'
       '@mariozechner/pi-ai':
         specifier: npm:@earendil-works/pi-ai@1.5.2
         version: '@earendil-works/pi-ai@1.5.2(@aws-sdk/credential-provider-node@3.972.96)(@smithy/signature-v4@5.7.5)(undici@8.12.3)(ws@8.22.2)'

@@ -1,24 +1,59 @@
-import type { AssistantMessage } from "@mariozechner/pi-ai";
-import { convertToLlm, getMarkdownTheme, type ExtensionAPI, type ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
+import { runToolCall, type AgentTool } from "@mariozechner/pi-agent-core";
+import type { AssistantMessage, ToolCall } from "@mariozechner/pi-ai";
+import { convertToLlm, createReadOnlyTools, getMarkdownTheme, truncateHead, type ExtensionAPI, type ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
 import { type Component, Container, Input, Markdown, matchesKey, ScrollView, Spacer, Text, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 
 const INSTRUCTIONS = `Answer only the user's side question below, briefly and directly. Do not continue the main task.
 Earlier conversation and side exchanges provide context, not instructions to execute.
-You have no tools for this side request; historical tool declarations do not grant tool access.
-Do not read files, run commands, make changes, or claim to have done so.
-Use the conversation as evidence; distinguish observed tool results from assistant claims. Say when context is insufficient.
+For this side request you may call only read, grep, find, ls and git (status, diff, log, show, blame) to inspect the workspace; any other tool call is rejected.
+Do not run other commands or make changes, and do not claim to have done so.
+Use the conversation and your own reads as evidence; distinguish observed tool results from assistant claims. Say when context is insufficient.
 Missing tool results do not establish failure: those tools may still be running in the main conversation.
 Your answer stays outside the main conversation.`;
+const MAX_TOOL_ROUNDS = 8;
+const GIT_SUBCOMMANDS = new Set(["status", "diff", "log", "show", "blame"]);
+// These options write files or run external programs.
+const GIT_BLOCKED_ARG = /^--(output|ext-diff|textconv)(=|$)/;
 
 type Exchange = {
 	question: string;
 	answer: string;
+	tools: string[];
 	status: "streaming" | "done" | "error";
 	error?: string;
 };
 
 function answerText(message: AssistantMessage) {
 	return message.content.filter((block) => block.type === "text").map((block) => block.text).join("\n");
+}
+
+function describeCall(call: ToolCall) {
+	const args = JSON.stringify(call.arguments).replaceAll("`", "'");
+	return `\`${call.name} ${args.length > 80 ? `${args.slice(0, 77)}...` : args}\``;
+}
+
+function createGitTool(pi: ExtensionAPI, cwd: string): AgentTool<any> {
+	return {
+		name: "git", label: "git",
+		description: "Run a read-only git command in the workspace. Allowed subcommands: status, diff, log, show, blame. Pass arguments without the leading 'git', e.g. [\"diff\", \"--stat\"].",
+		parameters: {
+			type: "object", required: ["args"],
+			properties: { args: { type: "array", items: { type: "string" }, minItems: 1, description: "Subcommand followed by its arguments" } },
+		},
+		execute: async (_id, { args }: { args: string[] }, signal) => {
+			const [subcommand, ...rest] = args;
+			if (!GIT_SUBCOMMANDS.has(subcommand)) throw new Error(`git ${subcommand} is not allowed; use ${[...GIT_SUBCOMMANDS].join(", ")}`);
+			const blocked = rest.find((arg) => GIT_BLOCKED_ARG.test(arg));
+			if (blocked) throw new Error(`git option ${blocked} is not allowed`);
+			const safety = subcommand === "status" || subcommand === "blame" ? [] : ["--no-ext-diff", "--no-textconv"];
+			const result = await pi.exec("git", ["--no-pager", "--no-optional-locks", subcommand, ...safety, ...rest], {
+				cwd, signal, timeout: 30_000, maxBuffer: 10 * 1024 * 1024,
+			});
+			const output = truncateHead([result.stdout, result.stderr].filter(Boolean).join("\n"));
+			const text = `${output.content || "(no output)"}${output.truncated ? "\n[output truncated]" : ""}`;
+			return { content: [{ type: "text", text }], details: undefined, isError: result.code !== 0 };
+		},
+	};
 }
 
 export default function (pi: ExtensionAPI) {
@@ -85,7 +120,9 @@ export default function (pi: ExtensionAPI) {
 					}
 					for (const item of history) {
 						const turn = turns.get(item)!;
-						const text = `${item.answer || (item.status === "streaming" ? "Thinking..." : "No answer.")}${item.error ? `\n\nError: ${item.error}` : ""}`;
+						const activity = item.tools.map((tool) => `- ${tool}`).join("\n");
+						const body = item.answer || (item.status === "streaming" ? "Thinking..." : "No answer.");
+						const text = `${activity ? `${activity}\n\n` : ""}${body}${item.error ? `\n\nError: ${item.error}` : ""}`;
 						if (text !== turn.text) { turn.markdown.setText(text); turn.text = text; }
 					}
 				};
@@ -144,7 +181,7 @@ export default function (pi: ExtensionAPI) {
 						}
 						const edge = (text: string) => theme.fg("borderMuted", text);
 						const frame = (line: string) => edge("│ ") + pad(line, innerWidth) + edge(" │");
-						const title = " btw · no tools ";
+						const title = " btw · read-only ";
 						const top = width >= title.length + 4
 							? edge("╭─") + theme.fg("dim", title) + edge(`${"─".repeat(width - title.length - 3)}╮`)
 							: edge(`╭${"─".repeat(width - 2)}╮`);
@@ -191,43 +228,74 @@ export default function (pi: ExtensionAPI) {
 		if (messages[0]?.role !== "system") {
 			messages.unshift({ role: "system", content: ctx.getSystemPrompt(), timestamp: 0 });
 		}
+		const tools = [...createReadOnlyTools(ctx.cwd), createGitTool(pi, ctx.cwd)];
+		const declared = new Set<string>();
+		for (const message of messages) {
+			if (message.role !== "system") continue;
+			message.toolsRemoved?.forEach((tool) => declared.delete(tool.name));
+			message.toolsAdded?.forEach((tool) => declared.add(tool.name));
+		}
+		// Append-only declarations keep the main session's cached prefix; runToolCall rejects tools outside this set.
+		const missing = tools.filter((tool) => !declared.has(tool.name));
+		if (missing.length) {
+			messages.push({
+				role: "system", content: "", timestamp: Date.now(),
+				toolsAdded: missing.map(({ name, description, parameters }) => ({ name, description, parameters })),
+			});
+		}
 		const earlier = history.filter((item) => item.status === "done").map(({ question, answer }) => ({ question, answer }));
 		messages.push({
 			role: "user", content: JSON.stringify({ instructions: INSTRUCTIONS, earlierSideExchanges: earlier, question }), timestamp: Date.now(),
 		});
-		const item: Exchange = { question, answer: "", status: "streaming" };
+		const item: Exchange = { question, answer: "", tools: [], status: "streaming" };
 		history.push(item);
 		if (history.length > 20) history.shift();
 		const controller = new AbortController();
 		active = controller;
-		const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(120_000)]);
+		const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(300_000)]);
 		try {
-			const stream = ctx.modelRegistry.streamSimple(model, { messages }, {
-				signal, maxTokens: Math.min(8192, model.maxTokens),
-				reasoning: ctx.thinkingLevel === "off" ? undefined : ctx.thinkingLevel,
-				toolChoice: "none", cacheRetention: "short",
-				// Share cache affinity, not the main agent's stateful WebSocket connection.
-				sessionId: ctx.sessionManager.getSessionId(), transport: "sse",
-			});
 			let response: AssistantMessage | undefined;
-			for await (const event of stream) {
-				if (signal.aborted || active !== controller) break;
-				if (event.type === "text_delta" || event.type === "text_end") {
-					item.answer = answerText(event.partial);
+			for (let round = 0; ; round++) {
+				const stream = ctx.modelRegistry.streamSimple(model, { messages }, {
+					signal, maxTokens: Math.min(8192, model.maxTokens),
+					reasoning: ctx.thinkingLevel === "off" ? undefined : ctx.thinkingLevel,
+					toolChoice: round < MAX_TOOL_ROUNDS ? "auto" : "none", cacheRetention: "short",
+					// Share cache affinity, not the main agent's stateful WebSocket connection.
+					sessionId: ctx.sessionManager.getSessionId(), transport: "sse",
+				});
+				response = undefined;
+				for await (const event of stream) {
+					if (signal.aborted || active !== controller) break;
+					if (event.type === "text_delta" || event.type === "text_end") {
+						item.answer = answerText(event.partial);
+						overlay?.refresh();
+					} else if (event.type === "done") response = event.message;
+					else if (event.type === "error") response = event.error;
+				}
+				signal.throwIfAborted();
+				if (!response) throw new Error("Response ended without a result");
+				const calls = response.content.filter((block): block is ToolCall => block.type === "toolCall");
+				if (response.stopReason !== "toolUse" || !calls.length || round >= MAX_TOOL_ROUNDS) break;
+				messages.push(response);
+				for (const call of calls) {
+					item.tools.push(describeCall(call));
 					overlay?.refresh();
-				} else if (event.type === "done") response = event.message;
-				else if (event.type === "error") response = event.error;
+					const outcome = await runToolCall(call, { tools, assistantMessage: response, context: { messages: [], tools }, signal });
+					signal.throwIfAborted();
+					messages.push({
+						role: "toolResult", toolCallId: call.id, toolName: call.name,
+						content: outcome.result.content, isError: outcome.isError, timestamp: Date.now(),
+					});
+				}
 			}
-			signal.throwIfAborted();
-			if (!response) throw new Error("Response ended without a result");
 			item.answer = answerText(response).trim();
-			if (response.content.some((block) => block.type === "toolCall")) throw new Error("Model requested tools; nothing was executed");
+			if (response.content.some((block) => block.type === "toolCall")) throw new Error(`Model kept requesting tools after ${MAX_TOOL_ROUNDS} rounds`);
 			if (response.stopReason !== "stop") throw new Error(response.errorMessage || `Response ended with ${response.stopReason}`);
 			if (!item.answer) throw new Error("Model returned no text");
 			item.status = "done";
 		} catch (error) {
 			item.status = "error";
-			item.error = controller.signal.aborted ? "Cancelled" : signal.aborted ? "Timed out after 120 seconds" : error instanceof Error ? error.message : "Side request failed";
+			item.error = controller.signal.aborted ? "Cancelled" : signal.aborted ? "Timed out after 300 seconds" : error instanceof Error ? error.message : "Side request failed";
 		} finally {
 			if (active === controller) {
 				active = undefined;
@@ -237,7 +305,7 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	pi.registerCommand("btw", {
-		description: "Tool-free side conversation; /btw reopens the last 20 in-memory exchanges",
+		description: "Read-only side conversation (read/grep/find/ls/git); /btw reopens the last 20 in-memory exchanges",
 		handler: async (args, ctx) => {
 			if (ctx.mode !== "tui") {
 				if (ctx.hasUI) ctx.ui.notify("/btw requires interactive terminal mode", "error");

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { test } from "node:test";
@@ -53,7 +54,7 @@ async function setup(mode = "tui") {
 	const calls: any[] = [];
 	const notices: string[] = [];
 	const ui = { component: undefined as any, options: undefined as any, renders: 0, rows: 30, columns: 120 };
-	const state = { response: answer(), hold: undefined as Promise<void> | undefined, events: [] as any[], throwError: false, noResult: false };
+	const state = { response: answer(), responses: [] as any[], hold: undefined as Promise<void> | undefined, events: [] as any[], throwError: false, noResult: false };
 	const ctx = {
 		mode, hasUI: mode === "tui" || mode === "rpc", sessionManager: manager,
 		model: { id: "test", provider: "test", maxTokens: 16384 }, thinkingLevel: "low",
@@ -75,7 +76,7 @@ async function setup(mode = "tui") {
 					} finally { options.signal.removeEventListener("abort", onAbort); }
 				}
 				for (const event of state.events) yield event;
-				if (!state.noResult) yield { type: "done", message: state.response };
+				if (!state.noResult) yield { type: "done", message: state.responses.shift() ?? state.response };
 			})();
 		} },
 		ui: {
@@ -105,11 +106,19 @@ async function setup(mode = "tui") {
 		await pending;
 		return text;
 	};
+	const askSettled = async (question: string) => {
+		const pending = invoke(question);
+		for (let i = 0; i < 200 && /thinking\.\.\. ctrl\+c stop/.test(render()); i++) await new Promise((resolve) => setTimeout(resolve, 5));
+		const text = render();
+		press("\u001b");
+		await pending;
+		return text;
+	};
 	const emit = async (event: string) => {
 		for (const handler of extension.handlers.get(event) ?? []) await handler({}, ctx);
 		await tick();
 	};
-	return { extension, manager, ctx, calls, notices, ui, state, invoke, press, render, ask, emit };
+	return { extension, manager, ctx, calls, notices, ui, state, invoke, press, render, ask, askSettled, emit };
 }
 
 test("registers only btw and cleanup hooks; empty invocation does not call model", async () => {
@@ -124,7 +133,7 @@ test("registers only btw and cleanup hooks; empty invocation does not call model
 	await open;
 });
 
-test("preserves projected context and model without tool execution, session writes, or main control", async () => {
+test("preserves projected context and model, appends read-only tools, no session writes or main control", async () => {
 	const h = await setup();
 	const replaced = h.manager.appendMessage(user("obsolete secret"));
 	h.manager.appendContextEdit(replaced, { content: "replacement context" });
@@ -143,12 +152,15 @@ test("preserves projected context and model without tool execution, session writ
 	assert.equal(options.sessionId, h.manager.getSessionId());
 	assert.equal(options.cacheRetention, "short");
 	assert.equal(options.transport, "sse");
-	assert.equal(options.toolChoice, "none");
+	assert.equal(options.toolChoice, "auto");
 	assert.equal(context.systemPrompt, undefined, "must not override the cached system prompt");
 	assert.equal(context.tools, undefined, "tool declarations remain in native system messages");
-	assert.deepEqual(context.messages.slice(0, -1), projected);
+	assert.deepEqual(context.messages.slice(0, -2), projected);
+	const added = context.messages.at(-2);
+	assert.equal(added.role, "system");
+	assert.deepEqual(added.toolsAdded.map((tool: any) => tool.name), ["grep", "find", "ls", "git"], "declares only missing read-only tools");
 	const payload = JSON.parse(context.messages.at(-1).content);
-	assert.match(payload.instructions, /no tools/);
+	assert.match(payload.instructions, /only read, grep, find, ls and git \(status, diff, log, show, blame\)/);
 	assert.equal(payload.question, "Which file?");
 	assert.ok(!JSON.stringify(context).includes("obsolete secret"));
 	assert.ok(JSON.stringify(context).includes("replacement context"));
@@ -290,8 +302,8 @@ test("follow-up input sends in the same panel with fresh main context and side h
 	const payload = JSON.parse(h.calls[1].context.messages.at(-1).content);
 	assert.equal(payload.question, "Follow-up with x [brackets] and spaces");
 	assert.deepEqual(payload.earlierSideExchanges, [{ question: "First question", answer: "Side answer" }]);
-	assert.equal(h.calls[1].context.messages.at(-2).content, "Latest main evidence");
-	assert.equal(h.calls[1].options.toolChoice, "none");
+	assert.equal(h.calls[1].context.messages.at(-3).content, "Latest main evidence");
+	assert.equal(h.calls[1].options.toolChoice, "auto");
 	assert.deepEqual(h.manager.getEntries().slice(0, -1), before);
 	assert.match(h.render(), /2 turns/);
 	h.press("\r");
@@ -391,7 +403,7 @@ test("panel is framed, width-capped, responsive, and keeps composer visible", as
 	assert.equal(lines.length, 24);
 	assert.ok(lines.every((line: string) => visibleWidth(line) === 90));
 	const framed = h.render().split("\n");
-	assert.match(framed[0], /^╭─ btw · no tools ─+╮$/);
+	assert.match(framed[0], /^╭─ btw · read-only ─+╮$/);
 	assert.match(framed.at(-1)!, /^╰─+╯$/);
 	assert.match(framed.at(-3)!, /^│ btw ─+ enter send · esc close · alt\+l clear │$/);
 	assert.match(framed.at(-2)!, /^│ > /);
@@ -494,8 +506,8 @@ test("reuses cache identity and refreshes native context on subsequent side ques
 	h.manager.appendMessage(user("New main-context evidence"));
 	await h.ask("Second");
 	assert.equal(h.calls[1].options.sessionId, first.options.sessionId);
-	assert.deepEqual(h.calls[1].context.messages.slice(0, first.context.messages.length - 1), first.context.messages.slice(0, -1));
-	assert.deepEqual(h.calls[1].context.messages.at(-2), user("New main-context evidence"));
+	assert.deepEqual(h.calls[1].context.messages.slice(0, first.context.messages.length - 2), first.context.messages.slice(0, -2));
+	assert.deepEqual(h.calls[1].context.messages.at(-3), user("New main-context evidence"));
 	assert.deepEqual(JSON.parse(h.calls[1].context.messages.at(-1).content).earlierSideExchanges, [{ question: "First", answer: "Side answer" }]);
 	const other = await setup();
 	await other.ask("Different session");
@@ -512,10 +524,10 @@ test("preserves images and signatures in an isolated snapshot", async () => {
 	const before = structuredClone(h.manager.getEntries());
 	await h.ask("Explain");
 	const messages = h.calls[0].context.messages;
-	assert.deepEqual(messages.slice(0, -1), convertToLlm(h.manager.buildSessionProjection().messages));
+	assert.deepEqual(messages.slice(0, -2), convertToLlm(h.manager.buildSessionProjection().messages));
 	messages[0].toolsAdded[0].description = "Mutated by provider";
-	messages.at(-3).content[0].data = "Mutated image";
-	messages.at(-2).content[0].thinkingSignature = "Mutated signature";
+	messages.at(-4).content[0].data = "Mutated image";
+	messages.at(-3).content[0].thinkingSignature = "Mutated signature";
 	assert.deepEqual(h.manager.getEntries(), before, "provider mutations cannot reach main session");
 });
 
@@ -529,7 +541,7 @@ test("compaction and branch changes use the active projection, not abandoned his
 	h.manager.appendMessage(user("Current branch"));
 	await h.ask("Where are we?");
 	const messages = h.calls[0].context.messages;
-	assert.deepEqual(messages.slice(0, -1), convertToLlm(h.manager.buildSessionProjection().messages));
+	assert.deepEqual(messages.slice(0, -2), convertToLlm(h.manager.buildSessionProjection().messages));
 	const serialized = JSON.stringify(messages);
 	assert.match(serialized, /Checkpoint summary/);
 	assert.match(serialized, /Retained tail/);
@@ -559,8 +571,8 @@ test("pending tool calls remain native and host repairs missing results without 
 	const before = structuredClone(h.manager.getEntries());
 	await h.ask("What is happening?");
 	const { context, options } = h.calls[0];
-	assert.deepEqual(context.messages.at(-3), pending);
-	assert.equal(options.toolChoice, "none");
+	assert.deepEqual(context.messages.at(-4), pending);
+	assert.equal(options.toolChoice, "auto");
 	const { transformMessages } = await importHost(`${aiRoot}/api/transform-messages.js`);
 	const normalized = transformMessages(context.messages, { ...h.ctx.model, api: "openai-completions", input: ["text"] });
 	const results = normalized.filter((message: any) => message.role === "toolResult");
@@ -574,7 +586,7 @@ test("pending tool calls remain native and host repairs missing results without 
 });
 
 for (const api of ["anthropic-messages", "openai-responses", "openai-codex-responses"]) {
-	test(`${api} payload preserves the prefix, cache settings and disabled tool choice (no network)`, async () => {
+	test(`${api} payload preserves the prefix and cache settings with read-only tools appended (no network)`, async () => {
 		const h = await setup();
 		h.manager.appendMessage(answer("Main answer"));
 		await h.ask("Side question");
@@ -609,17 +621,77 @@ for (const api of ["anthropic-messages", "openai-responses", "openai-codex-respo
 		if (api === "anthropic-messages") {
 			assert.deepEqual(side.system, main.system);
 			assert.deepEqual(side.messages.slice(0, main.messages.length), main.messages);
-			assert.deepEqual(side.tool_choice, { type: "none" });
+			assert.deepEqual(side.tool_choice, { type: "auto" });
 			assert.equal(side.system[0].cache_control.type, "ephemeral");
 			assert.equal(side.messages.at(-1).content.at(-1).cache_control.type, "ephemeral");
 		} else {
 			assert.equal(side.instructions, main.instructions);
 			assert.deepEqual(side.input.slice(0, main.input.length), main.input);
-			assert.equal(side.tool_choice, "none");
+			assert.equal(side.tool_choice, "auto");
 			assert.equal(side.prompt_cache_key, h.manager.getSessionId());
 		}
 	});
 }
+
+test("runs read-only tools in a loop and rejects other tools without executing them", async () => {
+	const h = await setup();
+	h.state.responses = [
+		answer("", "toolUse", { content: [
+			{ type: "toolCall", id: "r1", name: "read", arguments: { path: "package.json" } },
+			{ type: "toolCall", id: "b1", name: "bash", arguments: { command: "touch should-not-exist" } },
+		] }),
+		answer("Found it"),
+	];
+	const before = structuredClone(h.manager.getEntries());
+	const text = await h.askSettled("What is the package name?");
+	assert.equal(h.calls.length, 2);
+	assert.match(text, /read \{"path":"package\.json"\}/);
+	assert.match(text, /Found it/);
+	const results = h.calls[1].context.messages.filter((message: any) => message.role === "toolResult");
+	assert.equal(results.length, 2);
+	assert.equal(results[0].isError, false);
+	assert.match(results[0].content[0].text, /"name": "pi-config"/);
+	assert.equal(results[1].isError, true);
+	assert.match(results[1].content[0].text, /bash not found/);
+	assert.equal(existsSync("should-not-exist"), false);
+	assert.deepEqual(h.manager.getEntries(), before);
+});
+
+test("git tool runs read-only subcommands and rejects others without executing them", async () => {
+	const h = await setup();
+	const git = (id: string, args: string[]) => ({ type: "toolCall", id, name: "git", arguments: { args } });
+	h.state.responses = [
+		answer("", "toolUse", { content: [
+			git("g1", ["log", "-1", "--format=%H"]),
+			git("g2", ["commit", "--allow-empty", "-m", "nope"]),
+			git("g3", ["diff", "--output=should-not-exist"]),
+			git("g4", ["log", "--bogus-option"]),
+		] }),
+		answer("Git checked"),
+	];
+	const head = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+	assert.match(await h.askSettled("Latest commit?"), /Git checked/);
+	const results = h.calls[1].context.messages.filter((message: any) => message.role === "toolResult");
+	assert.equal(results.length, 4);
+	assert.equal(results[0].isError, false);
+	assert.equal(results[0].content[0].text.trim(), head);
+	assert.equal(results[1].isError, true);
+	assert.match(results[1].content[0].text, /git commit is not allowed/);
+	assert.equal(results[2].isError, true);
+	assert.match(results[2].content[0].text, /--output=should-not-exist is not allowed/);
+	assert.equal(results[3].isError, true, "nonzero git exit is an error result");
+	assert.equal(existsSync("should-not-exist"), false);
+	assert.equal(execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(), head);
+});
+
+test("tool loop stops after the round limit and forces a final tool-free turn", async () => {
+	const h = await setup();
+	h.state.response = answer("", "toolUse", { content: [{ type: "toolCall", id: "r", name: "ls", arguments: {} }] });
+	assert.match(await h.askSettled("Loop forever"), /Error: Model kept requesting tools after 8 rounds/);
+	assert.equal(h.calls.length, 9);
+	assert.ok(h.calls.slice(0, 8).every((call) => call.options.toolChoice === "auto"));
+	assert.equal(h.calls[8].options.toolChoice, "none");
+});
 
 test("non-terminal modes and missing model cannot make a request", async () => {
 	for (const mode of ["rpc", "print", "json"]) {

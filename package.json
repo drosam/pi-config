@@ -9,6 +9,7 @@
     "test:web-tools": "npm test --prefix extensions/web-tools"
   },
   "devDependencies": {
+    "@mariozechner/pi-agent-core": "npm:@earendil-works/pi-agent-core@1.5.2",
     "@mariozechner/pi-ai": "npm:@earendil-works/pi-ai@1.5.2",
     "@mariozechner/pi-coding-agent": "npm:@earendil-works/pi-coding-agent@1.5.2",
     "@mariozechner/pi-tui": "npm:@earendil-works/pi-tui@1.5.2",
