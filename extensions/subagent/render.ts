@@ -33,6 +33,11 @@ function formatToolCall(
   return fg("muted", `${toolName} ${parts.join(" ")}`)
 }
 
+function modelLabel(result: RunResult): string {
+  return [result.model ?? "default model", result.thinking ? `${result.thinking} effort` : ""]
+    .filter(Boolean).join(" · ")
+}
+
 function getElapsed(result: RunResult): string {
   const secs = result.elapsed ?? (Date.now() - result.startedAt) / 1000
   return formatElapsedSeconds(secs)
@@ -71,14 +76,17 @@ function renderCollapsed(
     } else {
       lines.push(fg("muted", `↳ (running...)`))
     }
+    lines.push(fg("dim", `  ${modelLabel(result)}`))
   } else if (isError && result.errorMessage) {
     // Error:
     // └ Error: something went wrong
     lines.push(`${fg("muted", "└ ")}${fg("error", `Error: ${result.errorMessage}`)}`)
+    lines.push(fg("dim", `  ${modelLabel(result)}`))
   } else {
     // Completed:
-    // └ 47 tool calls · 1m 54s
-    const summary = toolCallCount > 0 ? `${toolCallCount} tool calls · ${elapsed}` : elapsed
+    // └ 47 tool calls · anthropic/claude-haiku-4-5 · low effort · 1m 54s
+    const summary = [toolCallCount > 0 ? `${toolCallCount} tool calls` : "", modelLabel(result), elapsed]
+      .filter(Boolean).join(" · ")
     lines.push(`${fg("muted", "└ ")}${fg("muted", summary)}`)
   }
 
@@ -108,12 +116,10 @@ function renderExpanded(result: RunResult, displayItems: DisplayItem[], theme: a
     }
   }
 
-  // Footer: Explore · Claude Haiku 4.5 · 1m 54s
+  // Footer: Explore · anthropic/claude-haiku-4-5 · low effort · 1m 54s
   const agentLabel = result.agent.charAt(0).toUpperCase() + result.agent.slice(1)
   const footerParts: string[] = [fg("text", agentLabel)]
-  if (result.model) {
-    footerParts.push(fg("muted", result.model))
-  }
+  footerParts.push(fg("muted", modelLabel(result)))
   footerParts.push(fg("muted", getElapsed(result)))
 
   container.addChild(new Text(`\n${footerParts.join(fg("muted", " · "))}`, 0, 0))
