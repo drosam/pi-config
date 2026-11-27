@@ -50,6 +50,27 @@ export function resolveModel(config: ModelConfig | undefined, callerProvider?: s
   return `${callerProvider}/${model}`
 }
 
+export interface TaskOverrides {
+  model?: string
+  thinking?: string
+}
+
+/** Applies per-call model/thinking overrides; they win over agent frontmatter and caller defaults. */
+export function applyTaskOverrides(agent: AgentConfig, overrides: TaskOverrides): AgentConfig {
+  const model = overrides.model?.trim()
+  const thinking = overrides.thinking?.trim()
+  if (overrides.model !== undefined && !model) throw new Error("Task model must not be empty")
+  if (thinking !== undefined && !THINKING_LEVELS.has(thinking)) {
+    throw new Error(`Invalid task thinking level: "${thinking}". Use one of: ${[...THINKING_LEVELS].join(", ")}`)
+  }
+  if (!model && !thinking) return agent
+  return {
+    ...agent,
+    ...(model ? { model } : {}),
+    ...(thinking ? { thinking: thinking as ThinkingLevel } : {}),
+  }
+}
+
 // ── Extension resolution ────────────────────────────────────────────
 
 /** Cached package manager, keyed by cwd. */

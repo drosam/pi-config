@@ -4,7 +4,7 @@ import * as path from "node:path"
 import { getAgentDir, truncateHead, type ExtensionAPI, type ExtensionContext } from "@mariozechner/pi-coding-agent"
 import { Text, isKeyRelease, matchesKey, type TUI } from "@mariozechner/pi-tui"
 import { Type } from "@sinclair/typebox"
-import { discoverAgents } from "./agents.js"
+import { applyTaskOverrides, discoverAgents } from "./agents.js"
 import { type CallerDefaults, type RunResult, getDisplayItems } from "./runner.js"
 import { renderResult } from "./render.js"
 import { TaskManager, taskOutput } from "./manager.js"
@@ -24,6 +24,8 @@ const SubagentParams = Type.Object({
   command: Type.Optional(Type.String({ description: "The command that triggered this task" })),
   background: Type.Optional(Type.Boolean({ description: "Return immediately and notify on completion. Default false." })),
   resume: Type.Optional(Type.String({ description: "Task ID to continue with its saved conversation" })),
+  model: Type.Optional(Type.String({ description: "Model for this task as provider/id, overriding the agent and caller defaults" })),
+  thinking: Type.Optional(Type.String({ description: "Thinking level for this task: off, minimal, low, medium, high or xhigh" })),
 })
 
 export function buildTaskDescription(agents: { name: string; description?: string }[]): string {
@@ -265,15 +267,16 @@ export default function(pi: ExtensionAPI) {
 
   function launch(
     ctx: ExtensionContext,
-    params: { prompt: string; description: string; subagent_type?: string; background?: boolean; resume?: string },
+    params: { prompt: string; description: string; subagent_type?: string; background?: boolean; resume?: string; model?: string; thinking?: string },
     progress?: (result: RunResult) => void,
   ) {
     const tasks = current(ctx)
     const previous = params.resume ? tasks.get(params.resume) : undefined
     const type = params.subagent_type ?? previous?.agent
-    const agent = agents(ctx.cwd).find((agent) => agent.name === type)
-    if (!agent) throw new Error(`Unknown agent: "${type ?? ""}". Available: ${agents(ctx.cwd).map((a) => a.name).join(", ")}`)
+    const found = agents(ctx.cwd).find((agent) => agent.name === type)
+    if (!found) throw new Error(`Unknown agent: "${type ?? ""}". Available: ${agents(ctx.cwd).map((a) => a.name).join(", ")}`)
     if (!params.prompt.trim()) throw new Error("Task prompt must not be empty")
+    const agent = applyTaskOverrides(found, { model: params.model, thinking: params.thinking })
     const bridge = createTaskUiBridge(ctx, agent.name)
     return tasks.start(agent, params.prompt, params.description, params.background ?? false, defaults(ctx), {
       projectTrusted: ctx.isProjectTrusted(),

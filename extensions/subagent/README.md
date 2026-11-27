@@ -37,6 +37,7 @@ task({ description: "Explain retry findings", prompt: "Why does this retry fail?
 
 - `task_list` still lists agent definitions, not running tasks.
 - `background` defaults to `false`, including resumed calls.
+- Optional `model` (`provider/id`) and `thinking` override the agent frontmatter and caller defaults for that call only, for example `task({ ..., subagent_type: "code-review-behavior", model: "openai/gpt-6" })`. An empty model or unknown thinking level fails before launch; an unavailable model fails in the child task. Resume does not remember an earlier override.
 - Resume retains the child conversation and ID, increments its run number, and resolves the current agent definition and caller model defaults. Missing or invalid saved sessions fail instead of silently starting fresh.
 - An active task cannot be resumed concurrently. Steering is accepted after its subprocess is ready, and takes effect at Pi's next steering boundary, not midway through a tool.
 - `status` consumes a finished result and suppresses an unsent completion notification. A notification already queued to the parent can still arrive.

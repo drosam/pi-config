@@ -2,7 +2,8 @@ import { describe, test, expect, beforeEach, afterEach } from "vitest"
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
-import { discoverAgents, loadAgentsFromDir, resolveModel } from "./agents.js"
+import { applyTaskOverrides, discoverAgents, loadAgentsFromDir, resolveModel, type AgentConfig } from "./agents.js"
+import { buildArgs } from "./runner.js"
 
 let tmpDir: string
 
@@ -343,5 +344,38 @@ describe("discoverAgents", () => {
 
     expect(result).toHaveLength(1)
     expect(result[0]!.description).toBe("user scout")
+  })
+})
+
+describe("applyTaskOverrides", () => {
+  const base: AgentConfig = {
+    name: "reviewer", description: "d", systemPrompt: "p", source: "user", filePath: "/x.md",
+    model: { anthropic: "claude-haiku-4-5" }, thinking: "low",
+  }
+  const caller = { provider: "anthropic", model: "anthropic/claude-opus-5", thinking: "high" }
+
+  test("per-call model and thinking win over agent frontmatter and caller defaults", () => {
+    const args = buildArgs(applyTaskOverrides(base, { model: "openai/gpt-6", thinking: "xhigh" }), caller)
+
+    expect(args[args.indexOf("--model") + 1]).toBe("openai/gpt-6")
+    expect(args[args.indexOf("--thinking") + 1]).toBe("xhigh")
+  })
+
+  test("no overrides keeps the agent unchanged", () => {
+    expect(applyTaskOverrides(base, {})).toBe(base)
+    const args = buildArgs(applyTaskOverrides(base, {}), caller)
+    expect(args[args.indexOf("--model") + 1]).toBe("anthropic/claude-haiku-4-5")
+  })
+
+  test("model alone keeps the agent thinking level", () => {
+    const agent = applyTaskOverrides(base, { model: " openai/gpt-6 " })
+
+    expect(agent).toMatchObject({ model: "openai/gpt-6", thinking: "low" })
+    expect(base.model).toEqual({ anthropic: "claude-haiku-4-5" })
+  })
+
+  test("rejects an empty model and an unknown thinking level", () => {
+    expect(() => applyTaskOverrides(base, { model: "  " })).toThrow("Task model must not be empty")
+    expect(() => applyTaskOverrides(base, { thinking: "extreme" })).toThrow("Invalid task thinking level")
   })
 })

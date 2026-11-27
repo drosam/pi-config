@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 
 const run = vi.hoisted(() => ({ execute: vi.fn() }))
-vi.mock("./agents.js", () => ({
+vi.mock("./agents.js", async (original) => ({
+  ...await original(),
   discoverAgents: () => [{ name: "explore", description: "test", systemPrompt: "", source: "user", filePath: "/tmp/agent.md" }],
 }))
 vi.mock("node:fs/promises", () => ({ mkdir: vi.fn().mockResolvedValue(undefined), stat: vi.fn(), readFile: vi.fn() }))
@@ -55,6 +56,20 @@ const call = (name: string, params: any) => tools[name].execute("tool-id", param
 const start = () => call("task", { description: "research task", prompt: "work", subagent_type: "explore", background: true })
 
 describe("task extension integration", () => {
+  test("per-call model and thinking reach the launched agent", async () => {
+    await call("task", { description: "r2 review", prompt: "work", subagent_type: "explore", background: true, model: "openai/gpt-6", thinking: "high" })
+    await vi.waitFor(() => expect(runs).toHaveLength(1))
+    expect(run.execute.mock.calls[0][0]).toMatchObject({ name: "explore", model: "openai/gpt-6", thinking: "high" })
+    runs[0].finish()
+  })
+
+  test("invalid thinking level fails before launch", async () => {
+    const result = await call("task", { description: "bad", prompt: "work", subagent_type: "explore", thinking: "extreme" })
+    expect(result.isError).toBe(true)
+    expect(result.content[0].text).toContain("Invalid task thinking level")
+    expect(runs).toHaveLength(0)
+  })
+
   test("background completion is delivered once with identity and resumable history", async () => {
     const result = await start()
     const id = result.details.taskId
