@@ -1,7 +1,7 @@
 import { Input, SelectList, matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi, type KeybindingsManager } from "@mariozechner/pi-tui"
 import { taskOutput } from "./manager.js"
 import { isActiveTask, type TaskRecord } from "./types.js"
-import { alignedLine, cleanTaskText, elapsedTask, orderedTasks, paint, taskState, usageLabel, type FleetTheme } from "./fleet-view.js"
+import { alignedLine, cleanTaskText, elapsedTask, modelLabel, orderedTasks, paint, taskState, usageLabel, type FleetTheme } from "./fleet-view.js"
 
 export interface BrowserState {
   query: string
@@ -51,7 +51,7 @@ export class TaskBrowser {
     })
     const items = this.records.map((task) => ({
       value: task.id, label: cleanTaskText(task.description) || cleanTaskText(task.agent),
-      description: `${taskState(task).label}  ${elapsedTask(task)}`,
+      description: [taskState(task).label, elapsedTask(task), modelLabel(task)].filter(Boolean).join("  "),
     }))
     this.list = new SelectList(items, this.visibleRows, {
       selectedPrefix: (text) => paint(this.theme, "accent", text),
@@ -87,7 +87,8 @@ export class TaskBrowser {
     const state = taskState(task)
     const title = wrapTextWithAnsi(this.theme.bold(cleanTaskText(task.description)), width).slice(0, height >= 6 ? 2 : 1)
     const usage = usageLabel(task)
-    const metadata = `${cleanTaskText(task.agent)}  /  ${state.label}  /  ${elapsedTask(task)}  /  run ${task.run}${usage ? `  /  ${usage}` : ""}`
+    const model = modelLabel(task, true)
+    const metadata = `${cleanTaskText(task.agent)}  /  ${state.label}  /  ${elapsedTask(task)}  /  run ${task.run}${model ? `  /  ${model}` : ""}${usage ? `  /  ${usage}` : ""}`
     const preview = isActiveTask(task) ? task.lastActivity || "Worker is starting..." : taskOutput(task)
     const body = wrapTextWithAnsi(cleanTaskText(preview).slice(0, 600), width)
     return [

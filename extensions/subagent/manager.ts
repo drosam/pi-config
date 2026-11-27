@@ -3,7 +3,7 @@ import { mkdir } from "node:fs/promises"
 import * as path from "node:path"
 import { truncateHead } from "@mariozechner/pi-coding-agent"
 import type { AgentConfig } from "./agents.js"
-import { runAgent, getFinalOutput, type AgentControl, type CallerDefaults, type OnProgress, type RunOptions, type RunResult } from "./runner.js"
+import { runAgent, getFinalOutput, resolveRunSettings, type AgentControl, type CallerDefaults, type OnProgress, type RunOptions, type RunResult } from "./runner.js"
 import { isActiveTask, type TaskRecord } from "./types.js"
 
 /** Workers running at once per parent session; extra tasks queue. */
@@ -110,7 +110,7 @@ export class TaskManager {
     const id = previous?.id ?? randomUUID()
     const task: TaskRecord = {
       id, ownerId: this.options.ownerId, agent: agent.name, agentSource: agent.source,
-      description, prompt, cwd: this.options.cwd,
+      description, ...resolveRunSettings(agent, defaults), prompt, cwd: this.options.cwd,
       sessionFile: path.join(this.options.sessionDir, `${id}.jsonl`),
       run: (previous?.run ?? 0) + 1, status: "queued", background,
       createdAt: previous?.createdAt ?? Date.now(),

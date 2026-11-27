@@ -15,6 +15,8 @@ export interface TaskRecord {
   agent: string
   agentSource: "user" | "project"
   description: string
+  model?: string
+  thinking?: string
   prompt: string
   cwd: string
   sessionFile: string

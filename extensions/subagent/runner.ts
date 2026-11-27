@@ -93,6 +93,14 @@ async function validateSavedSession(file: string, cwd: string): Promise<void> {
   } finally { await handle.close() }
 }
 
+/** Model and thinking level a run will use after agent and caller defaults are applied. */
+export function resolveRunSettings(agent: AgentConfig, callerDefaults?: CallerDefaults): { model?: string; thinking?: string } {
+  return {
+    model: resolveModel(agent.model, callerDefaults?.provider) ?? callerDefaults?.model,
+    thinking: agent.thinking ?? callerDefaults?.thinking,
+  }
+}
+
 export function buildArgs(agent: AgentConfig, callerDefaults?: CallerDefaults, options: RunOptions = {}): string[] {
   const args = ["--mode", "rpc"]
   if (options.sessionFile) args.push("--session", options.sessionFile)
@@ -102,8 +110,7 @@ export function buildArgs(agent: AgentConfig, callerDefaults?: CallerDefaults, o
     args.push("--no-extensions")
     if (Array.isArray(agent.extensions)) for (const ext of agent.extensions) args.push("-e", ext)
   }
-  const model = resolveModel(agent.model, callerDefaults?.provider) ?? callerDefaults?.model
-  const thinking = agent.thinking ?? callerDefaults?.thinking
+  const { model, thinking } = resolveRunSettings(agent, callerDefaults)
   if (model) args.push("--model", model)
   if (thinking) args.push("--thinking", thinking)
   if (agent.tools?.length) args.push("--tools", agent.tools.join(","))
@@ -122,8 +129,7 @@ export async function runAgent(
   const result: RunResult = {
     agent: agent.name, task, startedAt: Date.now(), exitCode: 0, messages: [], stderr: "",
     usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 },
-    model: resolveModel(agent.model, callerDefaults?.provider) ?? callerDefaults?.model,
-    thinking: agent.thinking ?? callerDefaults?.thinking,
+    ...resolveRunSettings(agent, callerDefaults),
     sessionFile: options.sessionFile,
   }
   let tmpDir: string | undefined

@@ -59,6 +59,14 @@ export function tokenLabel(task: TaskRecord): string {
   return tokens > 0 ? `${formatTokens(tokens)} tok` : ""
 }
 
+/** Model and effort, e.g. `claude-haiku-4-5 · low`; `full` keeps the provider prefix. */
+export function modelLabel(task: TaskRecord, full = false): string {
+  const model = task.model ?? task.result?.model
+  const thinking = task.thinking ?? task.result?.thinking
+  return [model && !full ? model.slice(model.lastIndexOf("/") + 1) : model, thinking]
+    .filter(Boolean).map((part) => cleanTaskText(part!)).join(" · ")
+}
+
 /** Token and cost details for wider views. */
 export function usageLabel(task: TaskRecord): string {
   const usage = task.result?.usage
@@ -127,7 +135,8 @@ export function renderFleetLines(tasks: readonly TaskRecord[], options: FleetRen
     const agent = cleanTaskText(task.agent)
     const agentText = theme ? theme.bold(agent) : agent
     const tokens = tokenLabel(task)
-    const suffix = `${tokens ? ` · ${tokens}` : ""} · ${elapsedTask(task, now)}`
+    const model = modelLabel(task)
+    const suffix = `${model ? ` · ${model}` : ""}${tokens ? ` · ${tokens}` : ""} · ${elapsedTask(task, now)}`
     const room = width - visibleWidth(prefix) - visibleWidth(agent) - 2 - visibleWidth(suffix)
     const description = room > 3 ? truncateToWidth(cleanTaskText(task.description), room, "...") : ""
     const tone: Tone = selected || !focused ? "text" : "muted"
